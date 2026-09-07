@@ -1,0 +1,31 @@
+{
+  "name": "devenv-agents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Project lifecycle tooling for devenv and Herdr worktrees",
+  "license": "MIT",
+  "bin": {
+    "project": "src/cli.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "project": "bun src/cli.ts",
+    "test": "bun test --parallel",
+    "check": "tsc --noEmit",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "build": "bun build --compile src/cli.ts --outfile dist/project"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "@types/node": "^26.4.1",
+    "oxfmt": "^0.65.0",
+    "oxlint": "^1.81.0",
+    "typescript": "^7"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  }
+}
