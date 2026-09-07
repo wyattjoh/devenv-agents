@@ -1,0 +1,35 @@
+{
+  "id": "cli:worktree:list",
+  "result": {
+    "source": {
+      "repo_key": "/tmp/probe/repo/.git",
+      "repo_name": "repo",
+      "repo_root": "/tmp/probe/repo",
+      "source_checkout_path": "/tmp/probe/repo",
+      "source_workspace_id": "w1"
+    },
+    "type": "worktree_list",
+    "worktrees": [
+      {
+        "branch": "main",
+        "is_bare": false,
+        "is_detached": false,
+        "is_linked_worktree": false,
+        "is_prunable": false,
+        "label": "repo",
+        "open_workspace_id": "w1",
+        "path": "/tmp/probe/repo"
+      },
+      {
+        "branch": "probe/feature",
+        "is_bare": false,
+        "is_detached": false,
+        "is_linked_worktree": true,
+        "is_prunable": false,
+        "label": "repo",
+        "open_workspace_id": "w2",
+        "path": "/tmp/probe/worktree/probe-feature"
+      }
+    ]
+  }
+}

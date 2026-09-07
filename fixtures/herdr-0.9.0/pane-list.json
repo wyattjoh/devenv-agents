@@ -1,0 +1,56 @@
+{
+  "id": "cli:pane:list",
+  "result": {
+    "panes": [
+      {
+        "agent_status": "unknown",
+        "cwd": "/tmp/probe/repo",
+        "focused": true,
+        "foreground_cwd": "/tmp/probe/repo",
+        "pane_id": "w1:p1",
+        "revision": 0,
+        "scroll": {
+          "max_offset_from_bottom": 38,
+          "offset_from_bottom": 0,
+          "viewport_rows": 40
+        },
+        "tab_id": "w1:t1",
+        "terminal_id": "term_probe_main",
+        "workspace_id": "w1"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/tmp/probe/repo",
+        "focused": false,
+        "foreground_cwd": "/tmp/probe/repo",
+        "pane_id": "w1:p2",
+        "revision": 0,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 40
+        },
+        "tab_id": "w1:t1",
+        "terminal_id": "term_probe_main_aux",
+        "workspace_id": "w1"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/tmp/probe/worktree/probe-feature",
+        "focused": false,
+        "foreground_cwd": "/tmp/probe/worktree/probe-feature",
+        "pane_id": "w2:p1",
+        "revision": 0,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 40
+        },
+        "tab_id": "w2:t1",
+        "terminal_id": "term_probe_worktree",
+        "workspace_id": "w2"
+      }
+    ],
+    "type": "pane_list"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "cli:plugin",
+  "result": {
+    "plugins": [
+      {
+        "enabled": true,
+        "manifest_path": "/tmp/probe/plugin/herdr-plugin.toml",
+        "min_herdr_version": "0.9.0",
+        "name": "Probe Reloaded",
+        "plugin_id": "probe",
+        "plugin_root": "/tmp/probe/plugin",
+        "source": {
+          "kind": "local"
+        },
+        "version": "0.2.0",
+        "warnings": [
+          "manifest does not declare platforms; platform support unknown"
+        ]
+      }
+    ],
+    "type": "plugin_list"
+  }
+}
