@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -60,6 +61,16 @@ export type WorktreeStatusPaths = {
   readonly directory: string;
   readonly statusPath: string;
   readonly claimPath: string;
+};
+
+/**
+ * A status entry discovered beneath a project's shared status root.
+ */
+export type WorktreeStatusEntry = {
+  readonly hash: string;
+  readonly directory: string;
+  readonly statusPath: string;
+  readonly status: WorktreeStatus | undefined;
 };
 
 /**
@@ -148,6 +159,15 @@ const writeJsonAtomically = (path: string, value: WorktreeStatus): void => {
 };
 
 /**
+ * Resolves the canonical root containing all worktree status entries.
+ *
+ * @param mainCheckout Canonical main checkout containing `.devenv/state`.
+ * @returns The shared status root for the project.
+ */
+export const getWorktreeStatusRoot = (mainCheckout: string): string =>
+  join(canonicalPath(mainCheckout), ".devenv", "state", "project", "worktrees");
+
+/**
  * Resolves the canonical status and claim paths for a worktree.
  *
  * @param mainCheckout Canonical main checkout containing `.devenv/state`.
@@ -161,7 +181,7 @@ export const getWorktreeStatusPaths = (
   const canonicalMainCheckout = canonicalPath(mainCheckout);
   const canonicalWorktreePath = canonicalPath(worktreePath);
   const hash = worktreeStatusHash(canonicalWorktreePath);
-  const directory = join(canonicalMainCheckout, ".devenv", "state", "project", "worktrees", hash);
+  const directory = join(getWorktreeStatusRoot(canonicalMainCheckout), hash);
   return {
     mainCheckout: canonicalMainCheckout,
     worktreePath: canonicalWorktreePath,
@@ -185,6 +205,41 @@ export const readWorktreeStatus = (statusPath: string): WorktreeStatus | undefin
   } catch {
     return undefined;
   }
+};
+
+/**
+ * Lists status entries recorded for a project, including malformed records.
+ *
+ * Malformed entries are returned with an undefined status so cleanup can report
+ * and remove them rather than silently leaving an orphaned marker behind.
+ *
+ * @param mainCheckout Main checkout containing the shared status root.
+ * @returns Status entries sorted by their hash directory.
+ */
+export const listWorktreeStatuses = (mainCheckout: string): readonly WorktreeStatusEntry[] => {
+  const root = getWorktreeStatusRoot(mainCheckout);
+  if (!existsSync(root)) return [];
+
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) => {
+      const directory = join(root, entry.name);
+      const statusPath = join(directory, "status.json");
+      const claimPath = join(directory, ".claim");
+      if (!existsSync(statusPath) && !existsSync(claimPath)) return [];
+      return [{ hash: entry.name, directory, statusPath, status: readWorktreeStatus(statusPath) }];
+    })
+    .toSorted((left, right) => left.hash.localeCompare(right.hash));
+};
+
+/**
+ * Removes a discovered status entry and any claim markers below it.
+ *
+ * @param entry Status entry returned by {@link listWorktreeStatuses}.
+ * @returns Nothing; missing entries are ignored.
+ */
+export const removeWorktreeStatusEntry = (entry: WorktreeStatusEntry): void => {
+  rmSync(entry.directory, { recursive: true, force: true });
 };
 
 const createClaim = (paths: WorktreeStatusPaths, startedAt: string): WorktreeStatusClaim => {

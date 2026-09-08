@@ -8,6 +8,12 @@ import {
   type ProjectPlatform,
 } from "./project-add.ts";
 import { formatProjectUpdate, runProjectUpdate } from "./project-update.ts";
+import {
+  formatAdoptWorktrees,
+  formatProjectGc,
+  runAdoptWorktrees,
+  runProjectGc,
+} from "./project-gc.ts";
 import { runWorktreeCreate, type WorktreeCreateResult } from "./worktree-create.ts";
 import {
   PROJECT_PLUGIN_ID,
@@ -64,6 +70,8 @@ Commands:
   wt on-event                    Handle a Herdr worktree event
   plugin install                 Link the Herdr worktree plugin
   update [--all]                 Refresh and rebuild project environments
+  gc [--all] [--dry-run]          Review or collect stale worktrees
+  adopt-worktrees [--all]        Bootstrap registered worktrees
 
 Options:
   -h, --help     Show this help message
@@ -307,6 +315,133 @@ const runProjectUpdateCommand = (
   }
 };
 
+const runProjectGcCommand = (
+  output: CliIO,
+  dependencies: CliDependencies,
+  args: readonly string[],
+): number => {
+  let all = false;
+  let dryRun = false;
+  for (const argument of args) {
+    if (argument === "--all" && !all) {
+      all = true;
+      continue;
+    }
+    if (argument === "--dry-run" && !dryRun) {
+      dryRun = true;
+      continue;
+    }
+    return printUnknown(output, argument ?? "gc");
+  }
+
+  const environment = dependencies.environment ?? process.env;
+  try {
+    if (!all) {
+      const result = runProjectGc({
+        buildDirectories: undefined,
+        dryRun,
+        herdrPath: environment.HERDR_BIN_PATH,
+        projectPath: dependencies.cwd ?? process.cwd(),
+        runner: dependencies.runner,
+      });
+      output.stdout(formatProjectGc(result));
+      return result.exitCode;
+    }
+
+    const roots = defaultProjectRoots();
+    const projects = enumerateProjects({
+      platform: platformFrom(environment.PROJECT_PLATFORM),
+      homeDirectory: environment.PROJECT_HOME ?? environment.HOME ?? roots.homeDirectory,
+      projectsFile: environment.PROJECT_PROJECTS_FILE,
+      systemdUserDirectory: environment.PROJECT_SYSTEMD_USER_DIRECTORY,
+    });
+    let exitCode = 0;
+    for (const project of projects) {
+      try {
+        const result = runProjectGc({
+          buildDirectories: undefined,
+          dryRun,
+          herdrPath: environment.HERDR_BIN_PATH,
+          projectPath: project.path,
+          runner: dependencies.runner,
+        });
+        output.stdout(formatProjectGc(result, project.repo));
+        if (result.exitCode !== 0) exitCode = 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        output.stderr(`[${project.repo}] ${PROJECT_NAME} gc: ${message}\n`);
+        exitCode = 1;
+      }
+    }
+    return exitCode;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    output.stderr(`${PROJECT_NAME} gc: ${message}\n`);
+    return 1;
+  }
+};
+
+const runAdoptWorktreesCommand = (
+  output: CliIO,
+  dependencies: CliDependencies,
+  args: readonly string[],
+): number => {
+  let all = false;
+  for (const argument of args) {
+    if (argument === "--all" && !all) {
+      all = true;
+      continue;
+    }
+    return printUnknown(output, argument ?? "adopt-worktrees");
+  }
+
+  const environment = dependencies.environment ?? process.env;
+  try {
+    if (!all) {
+      const result = runAdoptWorktrees({
+        herdrPath: environment.HERDR_BIN_PATH,
+        now: dependencies.now,
+        projectPath: dependencies.cwd ?? process.cwd(),
+        runner: dependencies.runner,
+        syncReferences: dependencies.syncReferences,
+      });
+      output.stdout(formatAdoptWorktrees(result));
+      return result.exitCode;
+    }
+
+    const roots = defaultProjectRoots();
+    const projects = enumerateProjects({
+      platform: platformFrom(environment.PROJECT_PLATFORM),
+      homeDirectory: environment.PROJECT_HOME ?? environment.HOME ?? roots.homeDirectory,
+      projectsFile: environment.PROJECT_PROJECTS_FILE,
+      systemdUserDirectory: environment.PROJECT_SYSTEMD_USER_DIRECTORY,
+    });
+    let exitCode = 0;
+    for (const project of projects) {
+      try {
+        const result = runAdoptWorktrees({
+          herdrPath: environment.HERDR_BIN_PATH,
+          now: dependencies.now,
+          projectPath: project.path,
+          runner: dependencies.runner,
+          syncReferences: dependencies.syncReferences,
+        });
+        output.stdout(formatAdoptWorktrees(result, project.repo));
+        if (result.exitCode !== 0) exitCode = 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        output.stderr(`[${project.repo}] ${PROJECT_NAME} adopt-worktrees: ${message}\n`);
+        exitCode = 1;
+      }
+    }
+    return exitCode;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    output.stderr(`${PROJECT_NAME} adopt-worktrees: ${message}\n`);
+    return 1;
+  }
+};
+
 const runProjectAddCommand = (
   output: CliIO,
   dependencies: CliDependencies,
@@ -449,6 +584,14 @@ export const runCli = (
 
   if (command === "update") {
     return runProjectUpdateCommand(output, resolvedDependencies, args.slice(1));
+  }
+
+  if (command === "gc") {
+    return runProjectGcCommand(output, resolvedDependencies, args.slice(1));
+  }
+
+  if (command === "adopt-worktrees") {
+    return runAdoptWorktreesCommand(output, resolvedDependencies, args.slice(1));
   }
 
   if (command === "worktree-setup") {

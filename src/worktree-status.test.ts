@@ -5,7 +5,9 @@ import { realpathSync } from "node:fs";
 import {
   claimWorktreeStatus,
   getWorktreeStatusPaths,
+  listWorktreeStatuses,
   readWorktreeStatus,
+  removeWorktreeStatusEntry,
   worktreeStatusHash,
   type WorktreeStatus,
 } from "./worktree-status.ts";
@@ -80,6 +82,31 @@ describe("worktree status", () => {
     writeFileSync(paths.statusPath, "not-json", "utf8");
 
     expect(readWorktreeStatus(paths.statusPath)).toBe(undefined);
+  });
+
+  it("lists an in-flight claim before its status is written", () => {
+    const { main, worktree } = makePaths();
+    const claim = claimWorktreeStatus(main, worktree, () => "2026-09-08T01:00:00.000Z");
+
+    expect(listWorktreeStatuses(main)).toHaveLength(1);
+    expect(listWorktreeStatuses(main)[0]?.status).toBe(undefined);
+    claim?.release();
+    expect(listWorktreeStatuses(main)).toEqual([]);
+  });
+
+  it("lists and removes status entries without resolving the worktree path", () => {
+    const { main, worktree } = makePaths();
+    const canonicalWorktree = realpathSync(worktree);
+    const claim = claimWorktreeStatus(main, worktree, () => "2026-09-08T01:00:00.000Z");
+    claim?.write("done", undefined, "2026-09-08T01:00:01.000Z");
+    claim?.release();
+    rmSync(worktree, { recursive: true, force: true });
+
+    const entries = listWorktreeStatuses(main);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.status?.path).toBe(canonicalWorktree);
+    removeWorktreeStatusEntry(entries[0]!);
+    expect(listWorktreeStatuses(main)).toEqual([]);
   });
 
   it("allows exactly one concurrent claim for a path", () => {
