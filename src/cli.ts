@@ -1,7 +1,13 @@
 #!/usr/bin/env bun
 
 import { defaultCommandRunner, type CommandRunner } from "./command-runner.ts";
-import { defaultProjectRoots, runProjectAdd, type ProjectPlatform } from "./project-add.ts";
+import {
+  defaultProjectRoots,
+  enumerateProjects,
+  runProjectAdd,
+  type ProjectPlatform,
+} from "./project-add.ts";
+import { formatProjectUpdate, runProjectUpdate } from "./project-update.ts";
 import { runWorktreeCreate, type WorktreeCreateResult } from "./worktree-create.ts";
 import {
   PROJECT_PLUGIN_ID,
@@ -57,6 +63,7 @@ Commands:
   sync                           Materialize declared project references
   wt on-event                    Handle a Herdr worktree event
   plugin install                 Link the Herdr worktree plugin
+  update [--all]                 Refresh and rebuild project environments
 
 Options:
   -h, --help     Show this help message
@@ -248,6 +255,58 @@ const platformFrom = (platform: string | undefined): ProjectPlatform => {
   throw new Error(`Unsupported host platform '${process.platform}'`);
 };
 
+const runProjectUpdateCommand = (
+  output: CliIO,
+  dependencies: CliDependencies,
+  args: readonly string[],
+): number => {
+  let all = false;
+  for (const argument of args) {
+    if (argument === "--all" && !all) {
+      all = true;
+      continue;
+    }
+    return printUnknown(output, argument ?? "update");
+  }
+
+  const environment = dependencies.environment ?? process.env;
+  try {
+    if (!all) {
+      const result = runProjectUpdate({
+        projectPath: dependencies.cwd ?? process.cwd(),
+        runner: dependencies.runner,
+      });
+      output.stdout(formatProjectUpdate(result));
+      return result.exitCode;
+    }
+
+    const roots = defaultProjectRoots();
+    const projects = enumerateProjects({
+      platform: platformFrom(environment.PROJECT_PLATFORM),
+      homeDirectory: environment.PROJECT_HOME ?? environment.HOME ?? roots.homeDirectory,
+      projectsFile: environment.PROJECT_PROJECTS_FILE,
+      systemdUserDirectory: environment.PROJECT_SYSTEMD_USER_DIRECTORY,
+    });
+    let exitCode = 0;
+    for (const project of projects) {
+      try {
+        const result = runProjectUpdate({ projectPath: project.path, runner: dependencies.runner });
+        output.stdout(formatProjectUpdate(result, project.repo));
+        if (result.exitCode !== 0) exitCode = 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        output.stderr(`[${project.repo}] ${PROJECT_NAME} update: ${message}\n`);
+        exitCode = 1;
+      }
+    }
+    return exitCode;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    output.stderr(`${PROJECT_NAME} update: ${message}\n`);
+    return 1;
+  }
+};
+
 const runProjectAddCommand = (
   output: CliIO,
   dependencies: CliDependencies,
@@ -386,6 +445,10 @@ export const runCli = (
   const resolvedDependencies = dependencies ?? defaultDependencies();
   if (command === "add") {
     return runProjectAddCommand(output, resolvedDependencies, args.slice(1));
+  }
+
+  if (command === "update") {
+    return runProjectUpdateCommand(output, resolvedDependencies, args.slice(1));
   }
 
   if (command === "worktree-setup") {
