@@ -104,6 +104,8 @@ describe("project CLI", () => {
       readLine: () => "q",
       runner,
       syncReferences: () => undefined,
+      environment: undefined,
+      pluginPath: undefined,
     };
     const output = captureOutput();
 
@@ -116,5 +118,25 @@ describe("project CLI", () => {
       ["devenv", "shell", "--", "true"],
       ["herdr", "pane", "list"],
     ]);
+  });
+
+  it("dispatches plugin install through the recording runner", () => {
+    const runner = createRecordingRunner({
+      "herdr plugin list --json": result(0, JSON.stringify({ result: { plugins: [] } })),
+    });
+    const dependencies: CliDependencies = {
+      cwd: undefined,
+      now: () => "2026-09-08T01:00:00.000Z",
+      readLine: () => "q",
+      runner,
+      syncReferences: () => undefined,
+      environment: {},
+      pluginPath: new URL("../plugin", import.meta.url).pathname,
+    };
+    const output = captureOutput();
+
+    expect(runCli(["plugin", "install"], output.io, dependencies)).toBe(0);
+    expect(output.stdout()).toContain("wyattjoh.project-worktrees: linked\n");
+    expect(output.stderr()).toBe("");
   });
 });

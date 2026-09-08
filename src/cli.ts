@@ -2,6 +2,13 @@
 
 import { defaultCommandRunner, type CommandRunner } from "./command-runner.ts";
 import {
+  PROJECT_PLUGIN_ID,
+  resolvePluginPath,
+  runPluginInstall,
+  runWorktreeEvent,
+  type PluginEnvironment,
+} from "./worktree-plugin.ts";
+import {
   noOpSyncReferences,
   runInteractiveWorktreeSetup,
   runWorktreeSetup,
@@ -36,6 +43,8 @@ Project lifecycle tooling for devenv and Herdr worktrees.
 
 Commands:
   worktree-setup [--interactive]  Bootstrap the current worktree
+  wt on-event                    Handle a Herdr worktree event
+  plugin install                 Link the Herdr worktree plugin
 
 Options:
   -h, --help     Show this help message
@@ -56,6 +65,14 @@ export type CliDependencies = {
   readonly readLine: () => string;
   readonly runner: CommandRunner;
   readonly syncReferences: SyncReferences;
+  /**
+   * Environment snapshot used by Herdr commands, or undefined for process.env.
+   */
+  readonly environment: PluginEnvironment | undefined;
+  /**
+   * Override for the plugin root used by plugin install, or undefined to resolve it.
+   */
+  readonly pluginPath: string | undefined;
 };
 
 const interactiveLine = (): string => {
@@ -73,6 +90,8 @@ const defaultDependencies = (): CliDependencies => ({
   readLine: interactiveLine,
   runner: defaultCommandRunner,
   syncReferences: noOpSyncReferences,
+  environment: undefined,
+  pluginPath: undefined,
 });
 
 const isHelpFlag = (argument: string): boolean => argument === "--help" || argument === "-h";
@@ -116,6 +135,36 @@ const runWorktreeSetupCommand = (
   }
 };
 
+const runWorktreeEventCommand = (dependencies: CliDependencies): number => {
+  const environment = dependencies.environment ?? process.env;
+  return runWorktreeEvent({
+    eventJson: environment.HERDR_PLUGIN_EVENT_JSON,
+    workspaceId: environment.HERDR_WORKSPACE_ID,
+    herdrPath: environment.HERDR_BIN_PATH,
+    now: dependencies.now,
+    runner: dependencies.runner,
+  }).exitCode;
+};
+
+const runPluginInstallCommand = (output: CliIO, dependencies: CliDependencies): number => {
+  const environment = dependencies.environment ?? process.env;
+  try {
+    const result = runPluginInstall({
+      herdrPath: environment.HERDR_BIN_PATH,
+      pluginPath: resolvePluginPath(dependencies.pluginPath, environment),
+      runner: dependencies.runner,
+    });
+    if (result.action !== "unchanged") {
+      output.stdout(`${PROJECT_PLUGIN_ID}: ${result.action}\n`);
+    }
+    return result.exitCode;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    output.stderr(`${PROJECT_NAME} plugin install: ${message}\n`);
+    return 1;
+  }
+};
+
 /**
  * Runs the project CLI for the supplied arguments.
  *
@@ -142,6 +191,7 @@ export const runCli = (
   }
 
   const command = args[0] ?? "";
+  const resolvedDependencies = dependencies ?? defaultDependencies();
   if (command === "worktree-setup") {
     const commandArguments = args.slice(1);
     if (
@@ -150,11 +200,17 @@ export const runCli = (
     ) {
       return printUnknown(output, commandArguments[0] ?? command);
     }
-    return runWorktreeSetupCommand(
-      output,
-      dependencies ?? defaultDependencies(),
-      commandArguments.length === 1,
-    );
+    return runWorktreeSetupCommand(output, resolvedDependencies, commandArguments.length === 1);
+  }
+
+  if (command === "wt" && args[1] === "on-event") {
+    if (args.length !== 2) return printUnknown(output, args[2] ?? command);
+    return runWorktreeEventCommand(resolvedDependencies);
+  }
+
+  if (command === "plugin" && args[1] === "install") {
+    if (args.length !== 2) return printUnknown(output, args[2] ?? command);
+    return runPluginInstallCommand(output, resolvedDependencies);
   }
 
   return printUnknown(output, command);

@@ -1,0 +1,24 @@
+id = "wyattjoh.project-worktrees"
+name = "Project worktrees"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Bootstrap managed project worktrees when Herdr creates or opens them"
+platforms = ["linux", "macos"]
+
+[[events]]
+on = "worktree.created"
+command = ["bash", "-c", "exec project wt on-event"]
+
+[[events]]
+on = "worktree.opened"
+command = ["bash", "-c", "exec project wt on-event"]
+
+[[events]]
+on = "workspace.focused"
+command = ["bash", "-c", "exec project wt on-event"]
+
+[[panes]]
+id = "setup"
+title = "Worktree setup"
+placement = "overlay"
+command = ["bash", "-c", "exec project worktree-setup --interactive"]

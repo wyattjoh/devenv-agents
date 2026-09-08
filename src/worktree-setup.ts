@@ -228,6 +228,7 @@ export const runWorktreeSetup = (options: WorktreeSetupOptions): WorktreeSetupRe
     options.worktreePath,
     options.now,
     options.allowCompleted,
+    true,
   );
   if (claim === undefined) {
     const status = readWorktreeStatus(paths.statusPath);

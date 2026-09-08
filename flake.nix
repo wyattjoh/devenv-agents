@@ -19,11 +19,15 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
+          herdrPlugin = pkgs.runCommand "devenv-agents-herdr-plugin" { } ''
+            mkdir -p "$out"
+            cp -R ${./plugin}/. "$out/"
+          '';
           project = pkgs.stdenvNoCC.mkDerivation {
             pname = "project";
             version = "0.1.0";
             src = ./.;
-            nativeBuildInputs = [ pkgs.bun ];
+            nativeBuildInputs = [ pkgs.bun pkgs.makeWrapper ];
             dontConfigure = true;
             dontStrip = true;
             buildPhase = ''
@@ -36,20 +40,18 @@
             '';
             installPhase = ''
               runHook preInstall
-              install -Dm755 ./project "$out/bin/project"
+              install -Dm755 ./project "$out/bin/project-real"
+              makeWrapper "$out/bin/project-real" "$out/bin/project" \
+                --set DEVENV_AGENTS_PLUGIN_PATH "${herdrPlugin}"
               runHook postInstall
             '';
             postFixup = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
               # Bun's embedded Mach-O signature can be invalid after packaging. Sign the
-              # final output after all Nix fixups and verify it before publishing the store path.
-              /usr/bin/codesign --force --sign - "$out/bin/project"
-              /usr/bin/codesign --verify --strict --verbose=2 "$out/bin/project"
+              # final binary after all Nix fixups and verify it before publishing the store path.
+              /usr/bin/codesign --force --sign - "$out/bin/project-real"
+              /usr/bin/codesign --verify --strict --verbose=2 "$out/bin/project-real"
             '';
           };
-          herdrPlugin = pkgs.runCommand "devenv-agents-herdr-plugin" { } ''
-            mkdir -p "$out"
-            cp -R ${./plugin}/. "$out/"
-          '';
         in
         {
           inherit herdrPlugin project;

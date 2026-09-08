@@ -116,4 +116,30 @@ describe("worktree status", () => {
     repair?.write("done", undefined, "2026-09-08T01:00:07.000Z");
     repair?.release();
   });
+
+  it("hands an event claim to setup without leaving the worktree busy", () => {
+    const { main, worktree } = makePaths();
+    const eventClaim = claimWorktreeStatus(main, worktree, () => "2026-09-08T01:00:00.000Z");
+    const statusPath = eventClaim?.paths.statusPath ?? "";
+    const claimPath = eventClaim?.paths.claimPath ?? "";
+
+    eventClaim?.write("running", undefined, undefined);
+    eventClaim?.handoff();
+    const setupClaim = claimWorktreeStatus(
+      main,
+      worktree,
+      () => "2026-09-08T01:00:01.000Z",
+      undefined,
+      true,
+    );
+
+    expect(setupClaim === undefined).toBe(false);
+    expect(setupClaim?.startedAt).toBe("2026-09-08T01:00:00.000Z");
+    expect(existsSync(claimPath)).toBe(true);
+    setupClaim?.write("done", undefined, "2026-09-08T01:00:02.000Z");
+    setupClaim?.release();
+    eventClaim?.cancelHandoff();
+    expect(existsSync(claimPath)).toBe(false);
+    expect(readWorktreeStatus(statusPath)?.state).toBe("done");
+  });
 });

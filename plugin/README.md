@@ -1,6 +1,11 @@
-# Herdr plugin
+# Project worktrees Herdr plugin
 
-This directory is the packaged plugin location for `devenv-agents`. The plugin
-manifest and event handlers arrive in ticket 05. Ticket 02 exposes this
-directory as the `herdr-plugin` flake output so later releases can package it
-without changing the project build shape.
+This directory is the manifest-only Herdr plugin shipped with `devenv-agents`.
+It invokes the `project` CLI for worktree lifecycle events and provides the
+`setup` overlay used to bootstrap managed linked worktrees.
+
+The plugin has no build step or runtime dependencies. Link it with:
+
+```sh
+project plugin install
+```

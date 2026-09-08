@@ -84,9 +84,23 @@ export type WorktreeStatusClaim = {
    * Releases this claim without removing the persisted status record.
    */
   readonly release: () => void;
+  /**
+   * Transfers this claim to the setup process launched by the event hook.
+   *
+   * The claim remains held until setup adopts and releases it, preventing a
+   * paired Herdr event from opening a second overlay in the handoff window.
+   */
+  readonly handoff: () => void;
+  /**
+   * Cancels an event-to-setup handoff, or releases an untransferred claim.
+   */
+  readonly cancelHandoff: () => boolean;
 };
 
 const defaultNow = (): string => new Date().toISOString();
+const SETUP_HANDOFF = ".setup-handoff";
+const SETUP_OWNER = ".setup-owner";
+const SETUP_CANCELLED = ".setup-cancelled";
 
 const canonicalPath = (path: string): string => realpathSync(resolve(path));
 
@@ -173,45 +187,10 @@ export const readWorktreeStatus = (statusPath: string): WorktreeStatus | undefin
   }
 };
 
-/**
- * Atomically claims a worktree for setup.
- *
- * A completed record is terminal. Failed and running records may be retried when
- * no claim marker is present; the marker itself is created with one atomic mkdir,
- * so concurrent callers cannot both win.
- *
- * @param mainCheckout Main checkout containing the shared state directory.
- * @param worktreePath Worktree to claim.
- * @param now Timestamp factory used for deterministic tests.
- * @param allowCompleted Whether an explicit setup may claim a completed record for repair.
- * @returns A claim handle, or undefined when another setup owns it or it is done.
- */
-export const claimWorktreeStatus = (
-  mainCheckout: string,
-  worktreePath: string,
-  now: (() => string) | undefined = undefined,
-  allowCompleted: boolean | undefined = undefined,
-): WorktreeStatusClaim | undefined => {
-  const paths = getWorktreeStatusPaths(mainCheckout, worktreePath);
-  const current = readWorktreeStatus(paths.statusPath);
-  if (current?.state === "done" && allowCompleted !== true) return undefined;
-
-  mkdirSync(dirname(paths.statusPath), { recursive: true });
-  try {
-    mkdirSync(paths.claimPath);
-    const afterClaim = readWorktreeStatus(paths.statusPath);
-    if (afterClaim?.state === "done" && allowCompleted !== true) {
-      rmSync(paths.claimPath, { recursive: true, force: true });
-      return undefined;
-    }
-  } catch (error) {
-    if (isNodeError(error) && error.code === "EEXIST") return undefined;
-    rmSync(paths.claimPath, { recursive: true, force: true });
-    throw error;
-  }
-
-  const startedAt = (now ?? defaultNow)();
+const createClaim = (paths: WorktreeStatusPaths, startedAt: string): WorktreeStatusClaim => {
+  const handoffPath = join(paths.claimPath, SETUP_HANDOFF);
   let released = false;
+  let handedOff = false;
   return {
     paths,
     startedAt,
@@ -253,7 +232,98 @@ export const claimWorktreeStatus = (
       released = true;
       rmSync(paths.claimPath, { recursive: true, force: true });
     },
+    handoff: () => {
+      if (released) return;
+      mkdirSync(handoffPath);
+      handedOff = true;
+      released = true;
+    },
+    cancelHandoff: () => {
+      if (!handedOff) {
+        if (released) return false;
+        released = true;
+        rmSync(paths.claimPath, { recursive: true, force: true });
+        return true;
+      }
+      handedOff = false;
+      // Setup and cancellation race by renaming the marker. Whichever rename
+      // wins owns the next action; cancellation cannot remove setup's claim.
+      try {
+        renameSync(handoffPath, join(paths.claimPath, SETUP_CANCELLED));
+      } catch (error) {
+        if (isNodeError(error) && (error.code === "ENOENT" || error.code === "EEXIST"))
+          return false;
+        throw error;
+      }
+      rmSync(paths.claimPath, { recursive: true, force: true });
+      return true;
+    },
   };
+};
+
+const adoptSetupHandoff = (paths: WorktreeStatusPaths): WorktreeStatusClaim | undefined => {
+  const handoffPath = join(paths.claimPath, SETUP_HANDOFF);
+  const ownerPath = join(paths.claimPath, SETUP_OWNER);
+  try {
+    renameSync(handoffPath, ownerPath);
+  } catch (error) {
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "EEXIST"))
+      return undefined;
+    throw error;
+  }
+
+  const status = readWorktreeStatus(paths.statusPath);
+  if (status?.state !== "running") {
+    rmSync(paths.claimPath, { recursive: true, force: true });
+    return undefined;
+  }
+  return createClaim(paths, status.started_at);
+};
+
+/**
+ * Atomically claims a worktree for setup.
+ *
+ * A completed record is terminal. Failed and running records may be retried when
+ * no claim marker is present; the marker itself is created with one atomic mkdir,
+ * so concurrent callers cannot both win. Event hooks can hand their claim to the
+ * setup overlay; setup opts into adopting that handoff rather than reporting a
+ * false busy result.
+ *
+ * @param mainCheckout Main checkout containing the shared state directory.
+ * @param worktreePath Worktree to claim.
+ * @param now Timestamp factory used for deterministic tests.
+ * @param allowCompleted Whether an explicit setup may claim a completed record for repair.
+ * @param adoptHandoff Whether setup may take ownership of an event handoff claim.
+ * @returns A claim handle, or undefined when another setup owns it or it is done.
+ */
+export const claimWorktreeStatus = (
+  mainCheckout: string,
+  worktreePath: string,
+  now: (() => string) | undefined = undefined,
+  allowCompleted: boolean | undefined = undefined,
+  adoptHandoff: boolean | undefined = undefined,
+): WorktreeStatusClaim | undefined => {
+  const paths = getWorktreeStatusPaths(mainCheckout, worktreePath);
+  const current = readWorktreeStatus(paths.statusPath);
+  if (current?.state === "done" && allowCompleted !== true) return undefined;
+
+  mkdirSync(dirname(paths.statusPath), { recursive: true });
+  try {
+    mkdirSync(paths.claimPath);
+    const afterClaim = readWorktreeStatus(paths.statusPath);
+    if (afterClaim?.state === "done" && allowCompleted !== true) {
+      rmSync(paths.claimPath, { recursive: true, force: true });
+      return undefined;
+    }
+  } catch (error) {
+    if (isNodeError(error) && error.code === "EEXIST") {
+      return adoptHandoff === true ? adoptSetupHandoff(paths) : undefined;
+    }
+    rmSync(paths.claimPath, { recursive: true, force: true });
+    throw error;
+  }
+
+  return createClaim(paths, (now ?? defaultNow)());
 };
 
 const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
