@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { defaultCommandRunner, type CommandRunner } from "./command-runner.ts";
+import { runWorktreeCreate, type WorktreeCreateResult } from "./worktree-create.ts";
 import {
   PROJECT_PLUGIN_ID,
   resolvePluginPath,
@@ -43,6 +44,11 @@ Project lifecycle tooling for devenv and Herdr worktrees.
 
 Commands:
   worktree-setup [--interactive]  Bootstrap the current worktree
+  wt create <branch> [options]  Create and bootstrap a worktree
+      --base <ref>              Create from a base ref
+      --no-focus                Leave the new workspace unfocused
+      --json                    Print workspace and pane ids as JSON
+  wt new                        Prompt for and create a focused worktree
   wt on-event                    Handle a Herdr worktree event
   plugin install                 Link the Herdr worktree plugin
 
@@ -62,7 +68,7 @@ const processIO: CliIO = {
 export type CliDependencies = {
   readonly cwd: string | undefined;
   readonly now: () => string;
-  readonly readLine: () => string;
+  readonly readLine: (message?: string) => string;
   readonly runner: CommandRunner;
   readonly syncReferences: SyncReferences;
   /**
@@ -75,13 +81,15 @@ export type CliDependencies = {
   readonly pluginPath: string | undefined;
 };
 
-const interactiveLine = (): string => {
+const BRANCH_PROMPT = "Branch name: ";
+
+const interactiveLine = (message = "Press Enter to retry or q to quit: "): string => {
   const promptFunction = (
     globalThis as typeof globalThis & {
       prompt?: (message?: string) => string | null;
     }
   ).prompt;
-  return promptFunction?.("Press Enter to retry or q to quit: ") ?? "q";
+  return promptFunction?.(message) ?? (message === BRANCH_PROMPT ? "" : "q");
 };
 
 const defaultDependencies = (): CliDependencies => ({
@@ -146,6 +154,85 @@ const runWorktreeEventCommand = (dependencies: CliDependencies): number => {
   }).exitCode;
 };
 
+const worktreeCreateOutput = (result: WorktreeCreateResult, json: boolean): string => {
+  if (json) {
+    return `${JSON.stringify({
+      workspace_id: result.workspaceId,
+      root_pane_id: result.rootPaneId,
+    })}\n`;
+  }
+  return `Workspace ID: ${result.workspaceId}\nRoot pane ID: ${result.rootPaneId}\n`;
+};
+
+const runWorktreeCreateCommand = (
+  output: CliIO,
+  dependencies: CliDependencies,
+  args: readonly string[],
+  focus: boolean,
+): number => {
+  let branch: string | undefined;
+  let base: string | undefined;
+  let json = false;
+  let noFocus = false;
+
+  if (args.length === 0 || args[0]?.startsWith("--")) {
+    output.stderr(`${PROJECT_NAME} wt create: branch name is required\n`);
+    return 1;
+  }
+  branch = args[0];
+  for (let index = 1; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--base") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        output.stderr(`${PROJECT_NAME} wt create: --base requires a ref\n`);
+        return 1;
+      }
+      base = value;
+      index += 1;
+      continue;
+    }
+    if (argument === "--no-focus") {
+      noFocus = true;
+      continue;
+    }
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    return printUnknown(output, argument ?? "wt");
+  }
+
+  const environment = dependencies.environment ?? process.env;
+  try {
+    const result = runWorktreeCreate({
+      base,
+      branch,
+      cwd: dependencies.cwd ?? process.cwd(),
+      focus,
+      herdrPath: environment.HERDR_BIN_PATH,
+      noFocus,
+      runner: dependencies.runner,
+      sleep: undefined,
+    });
+    output.stdout(worktreeCreateOutput(result, json));
+    return 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    output.stderr(`${PROJECT_NAME} wt create: ${message}\n`);
+    return 1;
+  }
+};
+
+const runWorktreeNewCommand = (output: CliIO, dependencies: CliDependencies): number => {
+  const branch = dependencies.readLine(BRANCH_PROMPT).trim();
+  if (branch.length === 0) {
+    output.stderr(`${PROJECT_NAME} wt new: branch name is required\n`);
+    return 1;
+  }
+  return runWorktreeCreateCommand(output, dependencies, [branch], true);
+};
+
 const runPluginInstallCommand = (output: CliIO, dependencies: CliDependencies): number => {
   const environment = dependencies.environment ?? process.env;
   try {
@@ -201,6 +288,15 @@ export const runCli = (
       return printUnknown(output, commandArguments[0] ?? command);
     }
     return runWorktreeSetupCommand(output, resolvedDependencies, commandArguments.length === 1);
+  }
+
+  if (command === "wt" && args[1] === "create") {
+    return runWorktreeCreateCommand(output, resolvedDependencies, args.slice(2), false);
+  }
+
+  if (command === "wt" && args[1] === "new") {
+    if (args.length !== 2) return printUnknown(output, args[2] ?? command);
+    return runWorktreeNewCommand(output, resolvedDependencies);
   }
 
   if (command === "wt" && args[1] === "on-event") {

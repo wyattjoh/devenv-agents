@@ -384,6 +384,35 @@ const pluginEntriesFromResponse = (stdout: string): readonly ListedPlugin[] => {
   });
 };
 
+/**
+ * Verifies that the managed-worktree plugin is linked and enabled in Herdr.
+ *
+ * @param options Herdr executable and injected command runner.
+ * @returns Nothing when the plugin is ready for worktree creation.
+ * @throws When Herdr cannot list plugins, returns malformed JSON, or does not
+ * list this plugin as enabled.
+ */
+export const assertProjectPluginEnabled = (options: {
+  readonly herdrPath: string | undefined;
+  readonly runner: CommandRunner;
+}): void => {
+  const list = runCommand(options.runner, herdrCommand(options.herdrPath), [
+    "plugin",
+    "list",
+    "--json",
+  ]);
+  if (list.exitCode !== 0) throw commandFailure("herdr plugin list", list);
+
+  const plugin = pluginEntriesFromResponse(list.stdout).find(
+    (candidate) => candidate.pluginId === PROJECT_PLUGIN_ID,
+  );
+  if (plugin?.enabled !== true) {
+    throw new Error(
+      `Herdr plugin ${PROJECT_PLUGIN_ID} is not linked and enabled; run 'project plugin install' first`,
+    );
+  }
+};
+
 const comparablePluginRoot = (plugin: ListedPlugin): string | undefined => {
   const path = plugin.pluginRoot ?? plugin.manifestPath;
   if (path === undefined) return undefined;
