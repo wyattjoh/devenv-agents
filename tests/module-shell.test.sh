@@ -6,18 +6,29 @@ worktree_path=${2:?worktree path is required}
 main="$(cd "$main_path" && pwd -P)"
 worktree="$(cd "$worktree_path" && pwd -P)"
 
-# Keep the Darwin absence check independent of the caller's environment.
-unset PI_CODING_AGENT_DIR
+# Linux replaces these with absolute host-layer paths; Darwin preserves them.
+caller_claude_config_dir=${CLAUDE_CONFIG_DIR:?CLAUDE_CONFIG_DIR is required}
+caller_gh_config_dir=${GH_CONFIG_DIR:?GH_CONFIG_DIR is required}
+caller_pi_coding_agent_dir=${PI_CODING_AGENT_DIR:?PI_CODING_AGENT_DIR is required}
 
 cd "$worktree"
 devenv allow >/dev/null
 cat > .envrc <<'EOF_ENVRC'
+#!/usr/bin/env bash
+
+eval "$(devenv direnvrc)"
+use devenv
 export TEST_DIRENV_MARKER=loaded
 EOF_ENVRC
 # Approve the fixture .envrc through the module-provided direnv binary.
 devenv shell -- direnv allow >/dev/null
 
-MAIN="$main" WORKTREE="$worktree" devenv --shell bash shell <<'EOF'
+MAIN="$main" \
+  WORKTREE="$worktree" \
+  EXPECTED_CLAUDE_CONFIG_DIR="$caller_claude_config_dir" \
+  EXPECTED_GH_CONFIG_DIR="$caller_gh_config_dir" \
+  EXPECTED_PI_CODING_AGENT_DIR="$caller_pi_coding_agent_dir" \
+  devenv --shell bash shell <<'EOF'
 set -euo pipefail
 
 main=$MAIN
@@ -84,16 +95,21 @@ case "$(uname -s)" in
     assert_equal PI_CODING_AGENT_DIR "$HOME/.local/share/agents/pi" "$PI_CODING_AGENT_DIR"
     ;;
   Darwin)
-    if [ "${CLAUDE_CONFIG_DIR+x}" = x ] || [ "${GH_CONFIG_DIR+x}" = x ] || [ "${PI_CODING_AGENT_DIR+x}" = x ]; then
-      printf 'Claude, gh, and Pi config paths must remain unset on Darwin\n' >&2
-      exit 1
-    fi
+    assert_equal CLAUDE_CONFIG_DIR "$EXPECTED_CLAUDE_CONFIG_DIR" "$CLAUDE_CONFIG_DIR"
+    assert_equal GH_CONFIG_DIR "$EXPECTED_GH_CONFIG_DIR" "$GH_CONFIG_DIR"
+    assert_equal PI_CODING_AGENT_DIR "$EXPECTED_PI_CODING_AGENT_DIR" "$PI_CODING_AGENT_DIR"
     ;;
   *)
     printf 'unsupported test platform: %s\n' "$(uname -s)" >&2
     exit 1
     ;;
 esac
+
+# Check the environment through direnv's evaluated exec path, not only the
+# variables already present in the devenv shell.
+assert_equal "direnv CLAUDE_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" "$(direnv exec "$worktree" printenv CLAUDE_CONFIG_DIR)"
+assert_equal "direnv GH_CONFIG_DIR" "$GH_CONFIG_DIR" "$(direnv exec "$worktree" printenv GH_CONFIG_DIR)"
+assert_equal "direnv PI_CODING_AGENT_DIR" "$PI_CODING_AGENT_DIR" "$(direnv exec "$worktree" printenv PI_CODING_AGENT_DIR)"
 EOF
 
 cd "$main"

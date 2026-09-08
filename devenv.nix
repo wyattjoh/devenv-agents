@@ -9,6 +9,7 @@ let
     else
       { };
   scoped = declaration.services.scoped or [ ];
+  homeDirectory = builtins.getEnv "HOME";
   project = inputs.agents.packages.${pkgs.stdenv.hostPlatform.system}.project;
 in
 {
@@ -62,11 +63,11 @@ in
       };
     }
     # Linux uses the host layer for Claude, gh, and Pi configuration; Darwin
-    # leaves all three unset so each tool keeps its local configuration.
+    # leaves all three undefined so each tool preserves its caller configuration.
     (lib.mkIf pkgs.stdenv.hostPlatform.isLinux {
-      env.CLAUDE_CONFIG_DIR = "$HOME/.local/share/agents/claude";
-      env.GH_CONFIG_DIR = "$HOME/.local/share/agents/gh";
-      env.PI_CODING_AGENT_DIR = "$HOME/.local/share/agents/pi";
+      env.CLAUDE_CONFIG_DIR = "${homeDirectory}/.local/share/agents/claude";
+      env.GH_CONFIG_DIR = "${homeDirectory}/.local/share/agents/gh";
+      env.PI_CODING_AGENT_DIR = "${homeDirectory}/.local/share/agents/pi";
     })
   ];
 }

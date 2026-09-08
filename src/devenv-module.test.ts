@@ -25,7 +25,7 @@ const writeEnvironment = (directory: string, agentsRoot: string): void => {
 };
 
 describe("devenv agents module", () => {
-  it("exports shared worktree state and preserves the stable PATH order", () => {
+  it("evaluates host-layer config paths while preserving caller configuration", () => {
     withGitFixture((fixture) => {
       writeEnvironment(fixture.repository, repositoryRoot);
       writeEnvironment(fixture.worktree, repositoryRoot);
@@ -38,8 +38,9 @@ describe("devenv agents module", () => {
           XDG_CACHE_HOME: `${home}/.cache`,
           XDG_CONFIG_HOME: `${home}/.config`,
           XDG_DATA_HOME: `${home}/.local/share`,
-          CLAUDE_CONFIG_DIR: undefined,
-          GH_CONFIG_DIR: undefined,
+          CLAUDE_CONFIG_DIR: `${home}/caller-claude`,
+          GH_CONFIG_DIR: `${home}/caller-gh`,
+          PI_CODING_AGENT_DIR: `${home}/caller-pi`,
         });
         const result = Bun.spawnSync(["bash", shellTest, fixture.repository, fixture.worktree], {
           cwd: fixture.worktree,
