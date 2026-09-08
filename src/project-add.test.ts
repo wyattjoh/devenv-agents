@@ -138,7 +138,7 @@ describe("project add", () => {
     ]);
   });
 
-  it("clones, trusts, excludes local files, warms, syncs, and enables Linux", () => {
+  it("clones, trusts, allows direnv, warms non-interactively, syncs, and enables Linux", () => {
     const fixture = makeFixture();
     const checkout = join(fixture.code, "github.com", "example", "widget");
     mkdirSync(join(checkout, ".agents"), { recursive: true });
@@ -175,9 +175,20 @@ describe("project add", () => {
     expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
       ["herdr", "plugin", "list", "--json"],
       ["devenv", "allow"],
+      ["direnv", "allow"],
       ["devenv", "shell", "--", "true"],
       ["systemctl", "--user", "daemon-reload"],
       ["systemctl", "--user", "enable", "--now", "herdr@atlas"],
+    ]);
+    expect(runner.calls.slice(1, 4)).toEqual([
+      { command: "devenv", args: ["allow"], cwd: checkout, env: undefined },
+      { command: "direnv", args: ["allow"], cwd: checkout, env: undefined },
+      {
+        command: "devenv",
+        args: ["shell", "--", "true"],
+        cwd: checkout,
+        env: undefined,
+      },
     ]);
     expect(added.instructions).toContain("Host strix-atlas");
     expect(added.instructions).toContain(
@@ -222,6 +233,7 @@ describe("project add", () => {
         join(fixture.code, "github.com", "example", "widget"),
       ],
       ["devenv", "--from", `path:${join(templateRoot, "bun-ts")}`, "allow"],
+      ["direnv", "allow"],
       ["devenv", "shell", "--", "true"],
       ["systemctl", "--user", "daemon-reload"],
       ["systemctl", "--user", "enable", "--now", "herdr@widget"],

@@ -44,6 +44,7 @@
               mkdir -p "$out/share/devenv-agents/templates"
               cp -R ${./templates}/. "$out/share/devenv-agents/templates/"
               makeWrapper "$out/bin/project-real" "$out/bin/project" \
+                --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.direnv ]}" \
                 --set DEVENV_AGENTS_PLUGIN_PATH "${herdrPlugin}" \
                 --set PROJECT_TEMPLATE_ROOT "$out/share/devenv-agents/templates"
               runHook postInstall

@@ -249,7 +249,9 @@ export const runWorktreeSetup = (options: WorktreeSetupOptions): WorktreeSetupRe
     if (hasDevenvFile(options.worktreePath)) {
       runRequiredCommand(options.runner, "devenv", ["allow"], "devenv allow", options.worktreePath);
     }
+    runRequiredCommand(options.runner, "direnv", ["allow"], "direnv allow", options.worktreePath);
     linkLocalLayer(mainCheckout, options.worktreePath);
+    // Warm the profile without opening an interactive nested shell.
     runRequiredCommand(
       options.runner,
       "devenv",

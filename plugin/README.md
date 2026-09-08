@@ -4,6 +4,14 @@ This directory is the manifest-only Herdr plugin shipped with `devenv-agents`.
 It invokes the `project` CLI for worktree lifecycle events and provides the
 `setup` overlay used to bootstrap managed linked worktrees.
 
+Project templates use a committed `.envrc` with `use devenv` and ignore
+`.direnv/`, so activation is applied in place through direnv and Herdr can
+observe the foreground agent.
+Bootstrap approves `devenv` and direnv, then performs the existing
+noninteractive `devenv shell -- true` warm before syncing references; it does
+not launch an interactive nested devenv shell. The packaged `project` wrapper
+adds `direnv` to its PATH; source-CLI runs require host `direnv` and `devenv`.
+
 The plugin has no build step or runtime dependencies. Link it with:
 
 ```sh

@@ -116,6 +116,7 @@ describe("project CLI", () => {
     expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
       ["git", "-C", worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir"],
       ["devenv", "allow"],
+      ["direnv", "allow"],
       ["devenv", "shell", "--", "true"],
       ["herdr", "pane", "list"],
     ]);

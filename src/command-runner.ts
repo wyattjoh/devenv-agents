@@ -3,7 +3,7 @@ import { cleanGitEnv } from "./git-env.ts";
 /**
  * External commands that the fleet invokes directly.
  */
-export const EXTERNAL_COMMANDS = ["herdr", "devenv", "systemctl", "git"] as const;
+export const EXTERNAL_COMMANDS = ["herdr", "devenv", "direnv", "systemctl", "git"] as const;
 
 /**
  * Names of the external commands used by the fleet.
@@ -173,7 +173,7 @@ const copyResult = (result: CommandResult): CommandResult => ({ ...result });
 /**
  * Creates a recording command runner for deterministic service tests.
  *
- * A response may be keyed by `herdr`, `devenv`, or `systemctl`, or by the
+ * A response may be keyed by `herdr`, `devenv`, `direnv`, or `systemctl`, or by the
  * complete invocation such as `herdr plugin list`. Unconfigured commands
  * return a successful empty result instead of spawning a process.
  *

@@ -534,10 +534,12 @@ export const runProjectAdd = (options: ProjectAddOptions): ProjectAddResult => {
   const checkoutCreated = ensureCheckout(repository, checkoutPath, codeRoot, options.runner);
 
   prepareDevenv(checkoutPath, options.from, options.templateRoot, options.runner);
+  runRequiredCommand(options.runner, "direnv", ["allow"], "direnv allow", checkoutPath);
   const declaration: ProjectDeclaration = readProjectDeclaration(checkoutPath);
   const session = projectSession(repository, declaration);
   ensureLocalLayer(checkoutPath);
   writeInfoExcludes(checkoutPath);
+  // Warm the profile without opening an interactive nested shell.
   runRequiredCommand(
     options.runner,
     "devenv",

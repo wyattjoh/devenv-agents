@@ -19,12 +19,14 @@ in
 
   config = lib.mkMerge [
     {
-      packages = [ project pkgs.git pkgs.just pkgs.gh ];
+      packages = [ project pkgs.git pkgs.just pkgs.gh pkgs.direnv ];
       env.AGENTS_SESSION = config.agents.session;
       env.DISABLE_AUTOUPDATER = "1";
       env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = "1";
 
       enterShell = ''
+        # Install direnv's hook in the long-lived Bash process entered by devenv.
+        eval "$(direnv hook bash)"
         common="$(git rev-parse --path-format=absolute --git-common-dir)"
         main="$(dirname "$common")"
         root="$(cd "$DEVENV_ROOT" && pwd -P)"

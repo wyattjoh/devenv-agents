@@ -83,7 +83,7 @@ describe("worktree setup", () => {
     expect(runner.calls[0]?.env?.GIT_DIR).toBe(undefined);
   });
 
-  it("runs allow, local-layer linking, warm, and sync in order", () => {
+  it("runs allow, direnv approval, local-layer linking, noninteractive warm, and sync in order", () => {
     const paneList = JSON.stringify({
       result: {
         panes: [{ cwd: "/tmp/not-this-worktree", pane_id: "w1:p1" }],
@@ -106,6 +106,7 @@ describe("worktree setup", () => {
     expect(syncRequests).toEqual([options.mainCheckout]);
     expect(runner.calls).toEqual([
       { command: "devenv", args: ["allow"], cwd: options.worktreePath, env: undefined },
+      { command: "direnv", args: ["allow"], cwd: options.worktreePath, env: undefined },
       {
         command: "devenv",
         args: ["shell", "--", "true"],
@@ -118,7 +119,7 @@ describe("worktree setup", () => {
     expect(readWorktreeStatus(setup.statusPath)?.state).toBe("done");
   });
 
-  it("does not run allow when a worktree has no devenv file", () => {
+  it("does not run devenv allow when a worktree has no devenv file", () => {
     const runner = createRecordingRunner({ devenv: result(0) });
     const options = makeOptions(runner, () => undefined);
     rmSync(join(options.worktreePath, "devenv.nix"));
@@ -126,7 +127,16 @@ describe("worktree setup", () => {
     const setup = runWorktreeSetup(options);
 
     expect(setup.exitCode).toBe(0);
+    expect(runner.calls.filter((call) => call.command === "devenv")).toEqual([
+      {
+        command: "devenv",
+        args: ["shell", "--", "true"],
+        cwd: options.worktreePath,
+        env: undefined,
+      },
+    ]);
     expect(runner.calls).toEqual([
+      { command: "direnv", args: ["allow"], cwd: options.worktreePath, env: undefined },
       {
         command: "devenv",
         args: ["shell", "--", "true"],

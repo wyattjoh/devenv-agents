@@ -11,12 +11,17 @@ unset PI_CODING_AGENT_DIR
 
 cd "$worktree"
 devenv allow >/dev/null
+cat > .envrc <<'EOF_ENVRC'
+export TEST_DIRENV_MARKER=loaded
+EOF_ENVRC
+# Approve the fixture .envrc through the module-provided direnv binary.
+devenv shell -- direnv allow >/dev/null
 
-devenv shell -- bash -s -- "$main" "$worktree" <<'EOF'
+MAIN="$main" WORKTREE="$worktree" devenv --shell bash shell <<'EOF'
 set -euo pipefail
 
-main=$1
-worktree=$2
+main=$MAIN
+worktree=$WORKTREE
 state="$main/.devenv/state"
 
 assert_equal() {
@@ -42,6 +47,29 @@ assert_equal DENO_DIR "$state/deno" "$DENO_DIR"
 assert_equal DISABLE_AUTOUPDATER "1" "$DISABLE_AUTOUPDATER"
 assert_equal CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD "1" "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"
 assert_equal TEST_SCOPED_SERVICE "disabled" "$TEST_SCOPED_SERVICE"
+
+if ! command -v direnv >/dev/null; then
+  printf 'direnv must be provided by the shared module\n' >&2
+  exit 1
+fi
+if ! declare -F _direnv_hook >/dev/null; then
+  printf 'direnv Bash hook must be enabled by the shared module\n' >&2
+  exit 1
+fi
+
+# Exercise the hook in this same long-lived Bash process, rather than checking
+# an exported function in a child shell. A prompt cycle must load the .envrc
+# marker in place as the pane changes into the worktree.
+unset TEST_DIRENV_MARKER
+cd "$main"
+eval "${PROMPT_COMMAND[*]:-}"
+if [ "${TEST_DIRENV_MARKER+x}" = x ]; then
+  printf 'direnv marker must be unloaded outside the worktree\n' >&2
+  exit 1
+fi
+cd "$worktree"
+eval "${PROMPT_COMMAND[*]:-}"
+assert_equal TEST_DIRENV_MARKER loaded "${TEST_DIRENV_MARKER:-}"
 
 IFS=: read -r path_profile path_cargo path_npm path_bun path_rest <<< "$PATH"
 assert_equal PATH[0] "$DEVENV_DOTFILE/profile/bin" "$path_profile"
@@ -69,10 +97,10 @@ esac
 EOF
 
 cd "$main"
-devenv shell -- bash -s -- "$main" <<'EOF'
+MAIN="$main" devenv --shell bash shell <<'EOF'
 set -euo pipefail
 
-main=$1
+main=$MAIN
 state="$main/.devenv/state"
 
 if [ "${AGENTS_WORKTREE+x}" = x ]; then
