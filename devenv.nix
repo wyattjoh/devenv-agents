@@ -20,11 +20,12 @@ in
 
   config = lib.mkMerge [
     {
-      # Claude Code and Herdr stay native and self-updating under ~/.local/bin,
-      # so the profile deliberately omits them. python3 is required by Herdr's
-      # Claude integration hook, which exits silently without it and leaves a
-      # running agent undetected.
-      packages = [ project pkgs.git pkgs.just pkgs.gh pkgs.direnv pkgs.python3 ];
+      # Claude Code comes from nixpkgs rather than the native self-updating
+      # installer: that installer ships a generic dynamically-linked binary,
+      # which NixOS cannot execute without nix-ld. python3 is required by
+      # Herdr's Claude integration hook, which exits silently without it and
+      # leaves a running agent undetected.
+      packages = [ project pkgs.git pkgs.just pkgs.gh pkgs.claude-code pkgs.direnv pkgs.python3 ];
       env.AGENTS_SESSION = config.agents.session;
       env.DISABLE_AUTOUPDATER = "1";
       env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = "1";

@@ -67,12 +67,8 @@ if ! declare -F _direnv_hook >/dev/null; then
   printf 'direnv Bash hook must be enabled by the shared module\n' >&2
   exit 1
 fi
-# Claude Code stays native and self-updating under ~/.local/bin, so the shared
-# module must not shadow it with a Nix-provided copy in the project profile.
-if [ -e "$DEVENV_DOTFILE/profile/bin/claude" ]; then
-  printf 'shared module must not provide claude from the Nix profile\n' >&2
-  exit 1
-fi
+claude_path="$(direnv exec "$worktree" bash -c 'command -v claude')"
+assert_equal "direnv Claude Code path" "$DEVENV_DOTFILE/profile/bin/claude" "$claude_path"
 
 # The Herdr Claude integration hook execs python3. Without it the hook exits
 # silently and a running Claude is never reported as an agent.
