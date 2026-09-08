@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   HELP_TEXT,
@@ -10,6 +10,7 @@ import {
   type CliIO,
 } from "./cli.ts";
 import { createRecordingRunner, type CommandResult } from "./command-runner.ts";
+import { createSyncReferences } from "./project-sync.ts";
 
 const created: string[] = [];
 
@@ -118,6 +119,51 @@ describe("project CLI", () => {
       ["devenv", "shell", "--", "true"],
       ["herdr", "pane", "list"],
     ]);
+  });
+
+  it("dispatches project sync through the injected materializing adapter", () => {
+    const root = mkdtempSync(join("/tmp", "devenv-agents-cli-sync-"));
+    const home = join(root, "home");
+    const projectRoot = join(root, "project");
+    const worktreePath = join(root, "worktree");
+    const siblingPath = join(home, "code", "github.com", "acme", "docs");
+    mkdirSync(join(projectRoot, ".agents"), { recursive: true });
+    mkdirSync(worktreePath);
+    mkdirSync(siblingPath, { recursive: true });
+    const sibling = realpathSync(siblingPath);
+    writeFileSync(
+      join(projectRoot, ".agents", "project.toml"),
+      ["[[references]]", 'repo = "github.com/acme/docs"', 'grant = ["tree"]', ""].join("\n"),
+    );
+    created.push(root);
+
+    const runner = createRecordingRunner({
+      [`git -C ${worktreePath} rev-parse --path-format=absolute --git-common-dir`]: result(
+        0,
+        `${projectRoot}/.git\n`,
+      ),
+    });
+    const output = captureOutput();
+    const dependencies: CliDependencies = {
+      cwd: worktreePath,
+      now: () => "2026-09-08T01:00:00.000Z",
+      readLine: () => "q",
+      runner,
+      syncReferences: createSyncReferences({
+        codeRoot: join(home, "code"),
+        platform: "linux",
+        runner,
+      }),
+      environment: undefined,
+      pluginPath: undefined,
+    };
+
+    expect(runCli(["sync"], output.io, dependencies)).toBe(0);
+    expect(output.stdout()).toBe("");
+    expect(output.stderr()).toBe("");
+    expect(
+      JSON.parse(readFileSync(join(worktreePath, ".claude", "settings.local.json"), "utf8")),
+    ).toEqual({ permissions: { additionalDirectories: [sibling] } });
   });
 
   it("dispatches plugin install through the recording runner", () => {

@@ -33,8 +33,8 @@ export type SyncRequest = {
 /**
  * Synchronizes one worktree's declared references.
  *
- * Ticket07 supplies the materializing adapter. Ticket04 deliberately keeps the
- * seam explicit and invokes it even when the declaration contains no references.
+ * The project-sync module supplies the materializing adapter. This seam stays
+ * explicit and is invoked even when the declaration contains no references.
  */
 export type SyncReferences = {
   /**
@@ -301,7 +301,8 @@ export const runInteractiveWorktreeSetup = (
 };
 
 /**
- * A no-op synchronization adapter used until ticket07 supplies reference materialization.
+ * A no-op synchronization adapter for callers that explicitly do not need
+ * reference materialization, such as isolated setup tests.
  *
  * @param request Setup context, including the normalized declaration.
  * @returns Nothing; this adapter intentionally performs no materialization.

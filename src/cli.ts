@@ -10,8 +10,8 @@ import {
   runWorktreeEvent,
   type PluginEnvironment,
 } from "./worktree-plugin.ts";
+import { createSyncReferences, runProjectSync } from "./project-sync.ts";
 import {
-  noOpSyncReferences,
   runInteractiveWorktreeSetup,
   runWorktreeSetup,
   type SyncReferences,
@@ -54,6 +54,7 @@ Commands:
       --no-focus                Leave the new workspace unfocused
       --json                    Print workspace and pane ids as JSON
   wt new                        Prompt for and create a focused worktree
+  sync                           Materialize declared project references
   wt on-event                    Handle a Herdr worktree event
   plugin install                 Link the Herdr worktree plugin
 
@@ -102,7 +103,7 @@ const defaultDependencies = (): CliDependencies => ({
   now: () => new Date().toISOString(),
   readLine: interactiveLine,
   runner: defaultCommandRunner,
-  syncReferences: noOpSyncReferences,
+  syncReferences: createSyncReferences({ runner: defaultCommandRunner }),
   environment: undefined,
   pluginPath: undefined,
 });
@@ -322,6 +323,21 @@ const runProjectAddCommand = (
   }
 };
 
+const runSyncCommand = (output: CliIO, dependencies: CliDependencies): number => {
+  try {
+    runProjectSync({
+      runner: dependencies.runner,
+      syncReferences: dependencies.syncReferences,
+      worktreePath: dependencies.cwd ?? process.cwd(),
+    });
+    return 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    output.stderr(`${PROJECT_NAME} sync: ${message}\n`);
+    return 1;
+  }
+};
+
 const runPluginInstallCommand = (output: CliIO, dependencies: CliDependencies): number => {
   const environment = dependencies.environment ?? process.env;
   try {
@@ -390,6 +406,11 @@ export const runCli = (
   if (command === "wt" && args[1] === "new") {
     if (args.length !== 2) return printUnknown(output, args[2] ?? command);
     return runWorktreeNewCommand(output, resolvedDependencies);
+  }
+
+  if (command === "sync") {
+    if (args.length !== 1) return printUnknown(output, args[1] ?? command);
+    return runSyncCommand(output, resolvedDependencies);
   }
 
   if (command === "wt" && args[1] === "on-event") {

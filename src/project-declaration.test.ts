@@ -21,6 +21,20 @@ describe("project declaration", () => {
     });
   });
 
+  it("rejects an unknown reference grant with the allowed grant names", () => {
+    const root = mkdtempSync(join("/tmp", "devenv-agents-declaration-"));
+    created.push(root);
+    mkdirSync(join(root, ".agents"));
+    writeFileSync(
+      join(root, ".agents", "project.toml"),
+      ["[[references]]", 'repo = "github.com/acme/project"', 'grant = ["binary"]', ""].join("\n"),
+    );
+
+    expect(() => readProjectDeclaration(root)).toThrow(
+      "Project declaration reference grant must be tree, module, or services",
+    );
+  });
+
   it("reads session, scoped services, and reference grants", () => {
     const root = mkdtempSync(join("/tmp", "devenv-agents-declaration-"));
     created.push(root);
