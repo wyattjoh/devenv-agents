@@ -178,7 +178,7 @@ describe("project add", () => {
       ["direnv", "allow"],
       ["devenv", "shell", "--", "true"],
       ["systemctl", "--user", "daemon-reload"],
-      ["systemctl", "--user", "enable", "--now", "herdr@atlas"],
+      ["systemctl", "--user", "start", "herdr@atlas"],
     ]);
     expect(runner.calls.slice(1, 4)).toEqual([
       { command: "devenv", args: ["allow"], cwd: checkout, env: undefined },
@@ -236,7 +236,7 @@ describe("project add", () => {
       ["direnv", "allow"],
       ["devenv", "shell", "--", "true"],
       ["systemctl", "--user", "daemon-reload"],
-      ["systemctl", "--user", "enable", "--now", "herdr@widget"],
+      ["systemctl", "--user", "start", "herdr@widget"],
     ]);
   });
 
