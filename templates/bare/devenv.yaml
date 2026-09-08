@@ -1,5 +1,5 @@
 inputs:
   agents:
-    url: github:wyattjoh/devenv-agents
+    url: git+ssh://git@github.com/wyattjoh/devenv-agents.git
 imports:
   - agents
