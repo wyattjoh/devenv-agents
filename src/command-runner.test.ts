@@ -3,6 +3,7 @@ import {
   createRecordingRunner,
   defaultCommandRunner,
   runCommand,
+  runGitCommand,
   type CommandResult,
 } from "./command-runner.ts";
 
@@ -88,6 +89,19 @@ describe("command runner", () => {
     expect(response.exitCode).toBe(0);
     expect(response.stdout).toBe("runner-ok");
     expect(response.stderr).toBe("");
+  });
+
+  it("sanitizes Git repository variables at the injected boundary", () => {
+    const runner = createRecordingRunner({ git: result("git response") });
+
+    expect(
+      runGitCommand(runner, ["rev-parse", "--git-common-dir"], "/tmp/project", {
+        GIT_DIR: "/tmp/decoy/.git",
+        GIT_WORK_TREE: "/tmp/decoy",
+        KEEP: "yes",
+      }),
+    ).toEqual(result("git response"));
+    expect(runner.calls[0]?.env).toEqual({ KEEP: "yes" });
   });
 
   it("returns a successful empty response for an unconfigured recording call", () => {

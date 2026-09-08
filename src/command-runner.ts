@@ -1,7 +1,9 @@
+import { cleanGitEnv } from "./git-env.ts";
+
 /**
  * External commands that the fleet invokes directly.
  */
-export const EXTERNAL_COMMANDS = ["herdr", "devenv", "systemctl"] as const;
+export const EXTERNAL_COMMANDS = ["herdr", "devenv", "systemctl", "git"] as const;
 
 /**
  * Names of the external commands used by the fleet.
@@ -109,6 +111,26 @@ export const runCommand = (
     args: [...args],
     cwd: options?.cwd,
     env: options?.env,
+  });
+
+/**
+ * Runs Git through the injected runner with repository-location variables removed.
+ *
+ * @param runner Runner implementation, real or recording.
+ * @param args Arguments passed after the `git` executable.
+ * @param cwd Working directory for Git, or undefined to inherit the caller's directory.
+ * @param env Base environment to sanitize, or undefined to use the current process.
+ * @returns Git's captured result.
+ */
+export const runGitCommand = (
+  runner: CommandRunner,
+  args: readonly string[],
+  cwd: string | undefined = undefined,
+  env: Readonly<Record<string, string | undefined>> | undefined = undefined,
+): CommandResult =>
+  runCommand(runner, "git", args, {
+    cwd,
+    env: cleanGitEnv(env ?? process.env),
   });
 
 /**
