@@ -6,6 +6,9 @@ worktree_path=${2:?worktree path is required}
 main="$(cd "$main_path" && pwd -P)"
 worktree="$(cd "$worktree_path" && pwd -P)"
 
+# Keep the Darwin absence check independent of the caller's environment.
+unset PI_CODING_AGENT_DIR
+
 cd "$worktree"
 devenv allow >/dev/null
 
@@ -50,10 +53,11 @@ case "$(uname -s)" in
   Linux)
     assert_equal CLAUDE_CONFIG_DIR "$HOME/.local/share/agents/claude" "$CLAUDE_CONFIG_DIR"
     assert_equal GH_CONFIG_DIR "$HOME/.local/share/agents/gh" "$GH_CONFIG_DIR"
+    assert_equal PI_CODING_AGENT_DIR "$HOME/.local/share/agents/pi" "$PI_CODING_AGENT_DIR"
     ;;
   Darwin)
-    if [ "${CLAUDE_CONFIG_DIR+x}" = x ] || [ "${GH_CONFIG_DIR+x}" = x ]; then
-      printf 'Claude and gh config paths must remain unset on Darwin\n' >&2
+    if [ "${CLAUDE_CONFIG_DIR+x}" = x ] || [ "${GH_CONFIG_DIR+x}" = x ] || [ "${PI_CODING_AGENT_DIR+x}" = x ]; then
+      printf 'Claude, gh, and Pi config paths must remain unset on Darwin\n' >&2
       exit 1
     fi
     ;;

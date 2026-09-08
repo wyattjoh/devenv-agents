@@ -59,9 +59,12 @@ in
         exec = ''exec project update'';
       };
     }
+    # Linux uses the host layer for Claude, gh, and Pi configuration; Darwin
+    # leaves all three unset so each tool keeps its local configuration.
     (lib.mkIf pkgs.stdenv.hostPlatform.isLinux {
       env.CLAUDE_CONFIG_DIR = "$HOME/.local/share/agents/claude";
       env.GH_CONFIG_DIR = "$HOME/.local/share/agents/gh";
+      env.PI_CODING_AGENT_DIR = "$HOME/.local/share/agents/pi";
     })
   ];
 }
