@@ -67,8 +67,23 @@ if ! declare -F _direnv_hook >/dev/null; then
   printf 'direnv Bash hook must be enabled by the shared module\n' >&2
   exit 1
 fi
-claude_path="$(direnv exec "$worktree" bash -c 'command -v claude')"
-assert_equal "direnv Claude Code path" "$DEVENV_DOTFILE/profile/bin/claude" "$claude_path"
+# Claude Code stays native and self-updating under ~/.local/bin, so the shared
+# module must not shadow it with a Nix-provided copy in the project profile.
+if [ -e "$DEVENV_DOTFILE/profile/bin/claude" ]; then
+  printf 'shared module must not provide claude from the Nix profile\n' >&2
+  exit 1
+fi
+
+# The Herdr Claude integration hook execs python3. Without it the hook exits
+# silently and a running Claude is never reported as an agent.
+if ! command -v python3 >/dev/null; then
+  printf 'python3 must be provided by the shared module\n' >&2
+  exit 1
+fi
+if ! direnv exec "$worktree" bash -c 'command -v python3 >/dev/null'; then
+  printf 'python3 must resolve through direnv exec\n' >&2
+  exit 1
+fi
 
 # Exercise the hook in this same long-lived Bash process, rather than checking
 # an exported function in a child shell. A prompt cycle must load the .envrc
@@ -89,6 +104,16 @@ assert_equal PATH[0] "$DEVENV_DOTFILE/profile/bin" "$path_profile"
 assert_equal PATH[1] "$CARGO_HOME/bin" "$path_cargo"
 assert_equal PATH[2] "$NPM_CONFIG_PREFIX/bin" "$path_npm"
 assert_equal PATH[3] "$BUN_INSTALL/bin" "$path_bun"
+
+# Native CLIs (claude, herdr) install into ~/.local/bin. Keep it reachable
+# without displacing the stable profile entries above.
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *)
+    printf '%s/.local/bin must be on PATH\n' "$HOME" >&2
+    exit 1
+    ;;
+esac
 
 case "$(uname -s)" in
   Linux)

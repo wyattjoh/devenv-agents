@@ -20,7 +20,11 @@ in
 
   config = lib.mkMerge [
     {
-      packages = [ project pkgs.git pkgs.just pkgs.gh pkgs.claude-code pkgs.direnv ];
+      # Claude Code and Herdr stay native and self-updating under ~/.local/bin,
+      # so the profile deliberately omits them. python3 is required by Herdr's
+      # Claude integration hook, which exits silently without it and leaves a
+      # running agent undetected.
+      packages = [ project pkgs.git pkgs.just pkgs.gh pkgs.direnv pkgs.python3 ];
       env.AGENTS_SESSION = config.agents.session;
       env.DISABLE_AUTOUPDATER = "1";
       env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = "1";
@@ -46,7 +50,9 @@ in
         export DENO_DIR="$AGENTS_PROJECT_STATE/deno"
         mkdir -p "$RUSTUP_HOME" "$CARGO_HOME" "$NPM_CONFIG_PREFIX" "$NPM_CONFIG_CACHE" "$BUN_INSTALL" "$DENO_DIR"
         # Keep this stable path first so rebuilt profiles reach running processes.
-        export PATH="$DEVENV_DOTFILE/profile/bin:$CARGO_HOME/bin:$NPM_CONFIG_PREFIX/bin:$BUN_INSTALL/bin:$PATH"
+        # ~/.local/bin trails the caller's PATH so the self-updating native CLIs
+        # stay reachable without ever displacing the project profile.
+        export PATH="$DEVENV_DOTFILE/profile/bin:$CARGO_HOME/bin:$NPM_CONFIG_PREFIX/bin:$BUN_INSTALL/bin:$PATH:$HOME/.local/bin"
         [ -f "$AGENTS_PROJECT_STATE/references.env" ] && . "$AGENTS_PROJECT_STATE/references.env"
       '';
 

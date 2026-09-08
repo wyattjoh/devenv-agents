@@ -25,7 +25,7 @@ const writeEnvironment = (directory: string, agentsRoot: string): void => {
 };
 
 describe("devenv agents module", () => {
-  it("provides Claude Code through direnv while preserving caller configuration", () => {
+  it("activates through direnv and reaches native CLIs while preserving caller configuration", () => {
     withGitFixture((fixture) => {
       writeEnvironment(fixture.repository, repositoryRoot);
       writeEnvironment(fixture.worktree, repositoryRoot);
