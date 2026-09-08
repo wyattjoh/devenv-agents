@@ -41,8 +41,11 @@
             installPhase = ''
               runHook preInstall
               install -Dm755 ./project "$out/bin/project-real"
+              mkdir -p "$out/share/devenv-agents/templates"
+              cp -R ${./templates}/. "$out/share/devenv-agents/templates/"
               makeWrapper "$out/bin/project-real" "$out/bin/project" \
-                --set DEVENV_AGENTS_PLUGIN_PATH "${herdrPlugin}"
+                --set DEVENV_AGENTS_PLUGIN_PATH "${herdrPlugin}" \
+                --set PROJECT_TEMPLATE_ROOT "$out/share/devenv-agents/templates"
               runHook postInstall
             '';
             postFixup = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''

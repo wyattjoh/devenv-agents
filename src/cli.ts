@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { defaultCommandRunner, type CommandRunner } from "./command-runner.ts";
+import { defaultProjectRoots, runProjectAdd, type ProjectPlatform } from "./project-add.ts";
 import { runWorktreeCreate, type WorktreeCreateResult } from "./worktree-create.ts";
 import {
   PROJECT_PLUGIN_ID,
@@ -43,6 +44,10 @@ export const HELP_TEXT = `Usage: ${PROJECT_NAME} [options]
 Project lifecycle tooling for devenv and Herdr worktrees.
 
 Commands:
+  add <repo> [options]           Add and prepare a project checkout
+      --from <template>          Bind a bundled devenv template
+      --local                    Register without a systemd session
+      --host <name>              Host used in printed attachment snippets
   worktree-setup [--interactive]  Bootstrap the current worktree
   wt create <branch> [options]  Create and bootstrap a worktree
       --base <ref>              Create from a base ref
@@ -233,6 +238,90 @@ const runWorktreeNewCommand = (output: CliIO, dependencies: CliDependencies): nu
   return runWorktreeCreateCommand(output, dependencies, [branch], true);
 };
 
+const platformFrom = (platform: string | undefined): ProjectPlatform => {
+  if (platform === "linux" || platform === "darwin") return platform;
+  if (platform !== undefined) {
+    throw new Error(`PROJECT_PLATFORM must be either linux or darwin, got '${platform}'`);
+  }
+  if (process.platform === "darwin" || process.platform === "linux") return process.platform;
+  throw new Error(`Unsupported host platform '${process.platform}'`);
+};
+
+const runProjectAddCommand = (
+  output: CliIO,
+  dependencies: CliDependencies,
+  args: readonly string[],
+): number => {
+  let repository: string | undefined;
+  let from: string | undefined;
+  let local = false;
+  let host: string | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--from") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        output.stderr(`${PROJECT_NAME} add: --from requires a template\n`);
+        return 1;
+      }
+      from = value;
+      index += 1;
+      continue;
+    }
+    if (argument === "--local") {
+      local = true;
+      continue;
+    }
+    if (argument === "--host") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        output.stderr(`${PROJECT_NAME} add: --host requires a host name\n`);
+        return 1;
+      }
+      host = value;
+      index += 1;
+      continue;
+    }
+    if (argument?.startsWith("--")) return printUnknown(output, argument);
+    if (repository !== undefined) return printUnknown(output, argument ?? "add");
+    repository = argument;
+  }
+
+  if (repository === undefined) {
+    output.stderr(`${PROJECT_NAME} add: repository is required\n`);
+    return 1;
+  }
+
+  const environment = dependencies.environment ?? process.env;
+  const roots = defaultProjectRoots();
+  const homeDirectory = environment.PROJECT_HOME ?? environment.HOME ?? roots.homeDirectory;
+  try {
+    const result = runProjectAdd({
+      repository,
+      from,
+      local,
+      platform: platformFrom(environment.PROJECT_PLATFORM),
+      homeDirectory,
+      codeRoot: environment.PROJECT_CODE_ROOT,
+      projectsFile: environment.PROJECT_PROJECTS_FILE,
+      systemdUserDirectory: environment.PROJECT_SYSTEMD_USER_DIRECTORY,
+      templateRoot: environment.PROJECT_TEMPLATE_ROOT ?? roots.templateRoot,
+      host: host ?? environment.PROJECT_HOST ?? "strix",
+      user: environment.USER ?? environment.USERNAME ?? "user",
+      herdrPath: environment.HERDR_BIN_PATH,
+      runner: dependencies.runner,
+      syncReferences: dependencies.syncReferences,
+    });
+    output.stdout(result.instructions);
+    return 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    output.stderr(`${PROJECT_NAME} add: ${message}\n`);
+    return 1;
+  }
+};
+
 const runPluginInstallCommand = (output: CliIO, dependencies: CliDependencies): number => {
   const environment = dependencies.environment ?? process.env;
   try {
@@ -279,6 +368,10 @@ export const runCli = (
 
   const command = args[0] ?? "";
   const resolvedDependencies = dependencies ?? defaultDependencies();
+  if (command === "add") {
+    return runProjectAddCommand(output, resolvedDependencies, args.slice(1));
+  }
+
   if (command === "worktree-setup") {
     const commandArguments = args.slice(1);
     if (
