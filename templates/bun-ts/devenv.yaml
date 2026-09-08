@@ -1,0 +1,5 @@
+inputs:
+  agents:
+    url: github:wyattjoh/devenv-agents
+imports:
+  - agents

@@ -1,0 +1,4 @@
+{ ... }:
+{
+  languages.deno.enable = true;
+}

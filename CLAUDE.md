@@ -7,10 +7,17 @@ Bun and platform APIs, with no runtime package dependencies.
 ## Layout
 
 ```
+Devenv files:
+devenv.nix                     # shared project/worktree environment module
+templates/                    # bun-ts, rust, bare and deno starter environments
+.github/workflows/templates.yml # cross-platform template evaluation
+
+CLI and tests:
 src/cli.ts                 # source entrypoint and help/version behavior
 src/command-runner.ts      # injectable Herdr, devenv, and systemctl seam
 src/testing/git-env.ts     # sanitized Git process boundary
 src/testing/git-fixture.ts # temporary repository and linked-worktree helper
+tests/module-shell.test.sh # shell assertions for the worktree environment
 fixtures/                  # captured Herdr protocol responses
 plugin/                    # packaged Herdr plugin directory
 flake.nix                  # Nix packages for project and herdr-plugin
@@ -20,6 +27,11 @@ The command runner's default implementation spawns real processes. Tests use
 its recording implementation instead. Every Git fixture operation goes through
 the sanitized spawn helper so inherited `GIT_DIR` and related variables cannot
 redirect a test into another repository.
+
+The shared `devenv.nix` module is imported by projects through an `agents`
+input. It owns the project/worktree environment layout and adds the flake's
+`project` package. Templates use the published GitHub input; CI overlays a
+local relative input so the checkout under test is evaluated.
 
 ## Commands
 

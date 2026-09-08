@@ -1,0 +1,68 @@
+name: devenv templates
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    name: ${{ matrix.template }} (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - template: bun-ts
+            runner: ubuntu-24.04
+            platform: x86_64-linux
+          - template: rust
+            runner: ubuntu-24.04
+            platform: x86_64-linux
+          - template: bare
+            runner: ubuntu-24.04
+            platform: x86_64-linux
+          - template: deno
+            runner: ubuntu-24.04
+            platform: x86_64-linux
+          - template: bun-ts
+            runner: macos-14
+            platform: aarch64-darwin
+          - template: rust
+            runner: macos-14
+            platform: aarch64-darwin
+          - template: bare
+            runner: macos-14
+            platform: aarch64-darwin
+          - template: deno
+            runner: macos-14
+            platform: aarch64-darwin
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+      - uses: cachix/cachix-action@v16
+        with:
+          name: devenv
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Check runner architecture
+        run: |
+          case "${{ matrix.platform }}" in
+            x86_64-linux) test "$(uname -s)" = Linux && test "$(uname -m)" = x86_64 ;;
+            aarch64-darwin) test "$(uname -s)" = Darwin && test "$(uname -m)" = arm64 ;;
+            *) exit 1 ;;
+          esac
+      - name: Use the checkout's module input
+        working-directory: templates/${{ matrix.template }}
+        run: |
+          cat > devenv.local.yaml <<'EOF'
+          inputs:
+            agents:
+              url: path:../..
+          EOF
+      - name: Evaluate template
+        working-directory: templates/${{ matrix.template }}
+        run: devenv shell -- true
