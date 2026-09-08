@@ -30,9 +30,11 @@ redirect a test into another repository.
 
 The shared `devenv.nix` module is imported by projects through an `agents`
 input. It owns the project/worktree environment layout, provides `direnv` with
-its Bash hook for in-place activation, and adds the flake's `project` package.
-Templates use the published GitHub input over SSH; CI overlays a local relative
-input so the checkout under test is evaluated. Onboarding approves `devenv` first,
+its Bash hook for in-place activation and the Claude Code CLI, and adds the
+flake's `project` package. Because Claude Code is an unfree nixpkgs package,
+consumers must set `allowUnfree: true` in `devenv.yaml`. Templates use the
+published GitHub input over SSH; CI overlays a local relative input so the
+checkout under test is evaluated. Onboarding approves `devenv` first,
 then the committed `.envrc` (with `.direnv/` ignored) using `direnv allow`,
 and only uses `devenv shell -- true` as a noninteractive warm; it never starts
 an interactive nested `devenv shell`. The packaged `project` wrapper supplies

@@ -67,6 +67,8 @@ if ! declare -F _direnv_hook >/dev/null; then
   printf 'direnv Bash hook must be enabled by the shared module\n' >&2
   exit 1
 fi
+claude_path="$(direnv exec "$worktree" bash -c 'command -v claude')"
+assert_equal "direnv Claude Code path" "$DEVENV_DOTFILE/profile/bin/claude" "$claude_path"
 
 # Exercise the hook in this same long-lived Bash process, rather than checking
 # an exported function in a child shell. A prompt cycle must load the .envrc

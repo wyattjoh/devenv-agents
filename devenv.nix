@@ -20,7 +20,7 @@ in
 
   config = lib.mkMerge [
     {
-      packages = [ project pkgs.git pkgs.just pkgs.gh pkgs.direnv ];
+      packages = [ project pkgs.git pkgs.just pkgs.gh pkgs.claude-code pkgs.direnv ];
       env.AGENTS_SESSION = config.agents.session;
       env.DISABLE_AUTOUPDATER = "1";
       env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = "1";

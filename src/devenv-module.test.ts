@@ -12,7 +12,7 @@ const writeEnvironment = (directory: string, agentsRoot: string): void => {
   mkdirSync(`${directory}/.agents`, { recursive: true });
   writeFileSync(
     `${directory}/devenv.yaml`,
-    `inputs:\n  agents:\n    url: path:${agentsRoot}\nimports:\n  - agents\n`,
+    `inputs:\n  agents:\n    url: path:${agentsRoot}\nimports:\n  - agents\nallowUnfree: true\n`,
   );
   writeFileSync(
     `${directory}/devenv.nix`,
@@ -25,7 +25,7 @@ const writeEnvironment = (directory: string, agentsRoot: string): void => {
 };
 
 describe("devenv agents module", () => {
-  it("evaluates host-layer config paths while preserving caller configuration", () => {
+  it("provides Claude Code through direnv while preserving caller configuration", () => {
     withGitFixture((fixture) => {
       writeEnvironment(fixture.repository, repositoryRoot);
       writeEnvironment(fixture.worktree, repositoryRoot);
