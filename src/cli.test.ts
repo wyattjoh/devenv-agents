@@ -1,13 +1,21 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { HELP_TEXT, PROJECT_NAME, PROJECT_VERSION, runCli } from "./cli.ts";
+import {
+  COMMAND_HELP,
+  defaultDependencies,
+  HELP_TEXT,
+  PROJECT_NAME,
+  PROJECT_VERSION,
+  runCli,
+} from "./cli.ts";
 import { createRecordingRunner, type CommandResult } from "./command-runner.ts";
 import { captureOutput, createCliDependencies } from "./testing/cli.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
 import { createWorktreeBootstrap } from "./worktree-bootstrap.ts";
 import { createSyncReferences } from "./project-sync.ts";
+import { PROJECT_PLUGIN_ID } from "./worktree-plugin.ts";
 
 const created: string[] = [];
 
@@ -16,6 +24,35 @@ const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
   stdout,
   stderr,
 });
+
+const LEGACY_HELP_TEXT = `Usage: project [options]
+
+Project lifecycle tooling for devenv and Herdr worktrees.
+
+Commands:
+  add <repo> [options]           Add and prepare a project checkout
+      --from <template>          Bind a bundled devenv template
+      --local                    Register without a systemd session
+      --host <name>              Host used in printed attachment snippets
+  worktree-setup [--interactive]  Bootstrap the current worktree
+  wt create <branch> [options]  Create and bootstrap a worktree
+      --base <ref>              Create from a base ref
+      --no-focus                Leave the new workspace unfocused
+      --json                    Print workspace and pane ids as JSON
+  wt new                        Prompt for and create a focused worktree
+  sync                           Materialize declared project references
+  wt on-event                    Handle a Herdr worktree event
+  plugin install                 Link the Herdr worktree plugin
+  update [--all]                 Refresh and rebuild project environments
+  gc [--all] [--dry-run]          Review or collect stale worktrees
+  adopt-worktrees [--all]        Bootstrap registered worktrees
+
+Options:
+  -h, --help     Show this help message
+  -v, --version  Show the version
+`;
+
+const defaultTableDependencies = () => createCliDependencies({ readLine: () => "" });
 
 afterEach(() => {
   for (const path of created.splice(0)) rmSync(path, { recursive: true, force: true });
@@ -35,6 +72,7 @@ describe("project CLI", () => {
 
     expect(runCli(["--help"], output.io)).toBe(0);
     expect(output.stdout()).toBe(HELP_TEXT);
+    expect(HELP_TEXT).toBe(LEGACY_HELP_TEXT);
     expect(output.stderr()).toBe("");
   });
 
@@ -53,6 +91,285 @@ describe("project CLI", () => {
     expect(output.stderr()).toBe(
       "project: unknown argument '--not-a-command'\nRun 'project --help' for usage.\n",
     );
+  });
+
+  it("dispatches every command through the table and formats its result", () => {
+    const root = mkdtempSync(join("/tmp", "devenv-agents-cli-table-"));
+    const home = join(root, "home");
+    const code = join(root, "code");
+    const checkout = join(code, "github.com", "example", "widget");
+    const projectsFile = join(root, "projects.toml");
+    mkdirSync(join(checkout, ".agents"), { recursive: true });
+    writeFileSync(join(checkout, "devenv.nix"), "{ }: {}\n");
+    writeFileSync(join(checkout, ".agents", "project.toml"), 'session = "widget"\n');
+    created.push(root);
+
+    const herdrClient = createFakeHerdrClient({
+      listPlugins: () => [
+        {
+          pluginId: PROJECT_PLUGIN_ID,
+          enabled: true,
+          pluginRoot: undefined,
+          manifestPath: undefined,
+          version: "0.1.0",
+        },
+      ],
+    });
+    const addDependencies = () =>
+      createCliDependencies({
+        herdrClient,
+        runner: createRecordingRunner({ devenv: result(0) }),
+        environment: {
+          PROJECT_PLATFORM: "darwin",
+          PROJECT_HOME: home,
+          PROJECT_CODE_ROOT: code,
+          PROJECT_PROJECTS_FILE: projectsFile,
+          USER: "fixture",
+        },
+        readLine: () => "",
+      });
+    const createDependencies = () =>
+      createCliDependencies({
+        cwd: checkout,
+        herdrClient,
+        runner: createRecordingRunner({
+          [`git -C ${checkout} rev-parse --path-format=absolute --git-common-dir`]: result(
+            0,
+            `${checkout}/.git\n`,
+          ),
+        }),
+        readLine: () => "",
+      });
+    const cases = [
+      {
+        args: ["add", "github.com/example/widget"],
+        dependencies: addDependencies,
+        exitCode: 0,
+        stdout: undefined,
+        stdoutContains: "Host strix-widget",
+        stderr: "",
+      },
+      {
+        args: ["worktree-setup"],
+        dependencies: defaultTableDependencies,
+        exitCode: 0,
+        stdout: "",
+        stdoutContains: undefined,
+        stderr: "",
+      },
+      {
+        args: ["wt", "create", "feature", "--json"],
+        dependencies: createDependencies,
+        exitCode: 0,
+        stdout: '{"workspace_id":"fake-workspace","root_pane_id":"fake-root-pane"}\n',
+        stdoutContains: undefined,
+        stderr: "",
+      },
+      {
+        args: ["wt", "new"],
+        dependencies: defaultTableDependencies,
+        exitCode: 1,
+        stdout: "",
+        stdoutContains: undefined,
+        stderr: "project wt new: branch name is required\n",
+      },
+      {
+        args: ["sync"],
+        dependencies: defaultTableDependencies,
+        exitCode: 1,
+        stdout: "",
+        stdoutContains: undefined,
+        stderr: "project sync: ",
+      },
+      {
+        args: ["wt", "on-event"],
+        dependencies: defaultTableDependencies,
+        exitCode: 0,
+        stdout: "",
+        stdoutContains: undefined,
+        stderr: "",
+      },
+      {
+        args: ["plugin", "install"],
+        dependencies: defaultTableDependencies,
+        exitCode: 0,
+        stdout: `${PROJECT_PLUGIN_ID}: linked\n`,
+        stdoutContains: undefined,
+        stderr: "",
+      },
+      {
+        args: ["update"],
+        dependencies: defaultTableDependencies,
+        exitCode: 1,
+        stdout: "",
+        stdoutContains: undefined,
+        stderr: "project update: ",
+      },
+      {
+        args: ["gc"],
+        dependencies: defaultTableDependencies,
+        exitCode: 1,
+        stdout: "",
+        stdoutContains: undefined,
+        stderr: "project gc: ",
+      },
+      {
+        args: ["adopt-worktrees"],
+        dependencies: defaultTableDependencies,
+        exitCode: 1,
+        stdout: "",
+        stdoutContains: undefined,
+        stderr: "project adopt-worktrees: ",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const output = captureOutput();
+
+      expect(runCli(testCase.args, output.io, testCase.dependencies())).toBe(testCase.exitCode);
+      if (testCase.stdoutContains === undefined) {
+        expect(output.stdout()).toBe(testCase.stdout);
+      } else {
+        expect(output.stdout()).toContain(testCase.stdoutContains);
+      }
+      expect(output.stderr()).toStartWith(testCase.stderr);
+    }
+  });
+
+  it("fans out --all through one wrapper and continues after a project error", () => {
+    const root = mkdtempSync(join("/tmp", "devenv-agents-cli-fanout-"));
+    const first = join(root, "first");
+    const second = join(root, "second");
+    const projectsFile = join(root, "projects.toml");
+    mkdirSync(first, { recursive: true });
+    mkdirSync(second, { recursive: true });
+    writeFileSync(
+      projectsFile,
+      [
+        "[[projects]]",
+        'repo = "github.com/example/first"',
+        `path = ${JSON.stringify(first)}`,
+        'session = "first"',
+        "",
+        "[[projects]]",
+        'repo = "github.com/example/second"',
+        `path = ${JSON.stringify(second)}`,
+        'session = "second"',
+        "",
+      ].join("\n"),
+    );
+    created.push(root);
+
+    const runner = createRecordingRunner({
+      git: (invocation) => {
+        if (invocation.args.includes("rev-parse") && invocation.args.includes(first)) {
+          return result(1, "", "first unavailable");
+        }
+        if (invocation.args.includes("rev-parse")) {
+          return result(0, `${invocation.args[1]}/.git\n`);
+        }
+        return result(0);
+      },
+    });
+    const output = captureOutput();
+    const dependencies = createCliDependencies({
+      runner,
+      environment: {
+        PROJECT_PLATFORM: "darwin",
+        PROJECT_PROJECTS_FILE: projectsFile,
+      },
+    });
+
+    expect(runCli(["update", "--all"], output.io, dependencies)).toBe(1);
+    expect(output.stdout()).toContain("[github.com/example/second] Agents input");
+    expect(output.stderr()).toContain(
+      "[github.com/example/first] project update: git rev-parse --git-common-dir failed",
+    );
+    expect(
+      runner.calls.some(
+        (invocation) => invocation.command === "git" && invocation.args.includes(second),
+      ),
+    ).toBe(true);
+  });
+
+  it("uses one parser error shape for unknown flags and missing values", () => {
+    const cases = [
+      { args: ["add", "--unknown"], label: "add", detail: "unknown flag '--unknown'" },
+      { args: ["add", "--from"], label: "add", detail: "flag '--from' requires a value" },
+      {
+        args: ["worktree-setup", "--unknown"],
+        label: "worktree-setup",
+        detail: "unknown flag '--unknown'",
+      },
+      {
+        args: ["wt", "create", "branch", "--unknown"],
+        label: "wt create",
+        detail: "unknown flag '--unknown'",
+      },
+      {
+        args: ["wt", "create", "branch", "--base"],
+        label: "wt create",
+        detail: "flag '--base' requires a value",
+      },
+      { args: ["wt", "new", "--unknown"], label: "wt new", detail: "unknown flag '--unknown'" },
+      { args: ["sync", "--unknown"], label: "sync", detail: "unknown flag '--unknown'" },
+      {
+        args: ["wt", "on-event", "--unknown"],
+        label: "wt on-event",
+        detail: "unknown flag '--unknown'",
+      },
+      {
+        args: ["plugin", "install", "--unknown"],
+        label: "plugin install",
+        detail: "unknown flag '--unknown'",
+      },
+      { args: ["update", "--unknown"], label: "update", detail: "unknown flag '--unknown'" },
+      { args: ["gc", "--unknown"], label: "gc", detail: "unknown flag '--unknown'" },
+      {
+        args: ["adopt-worktrees", "--unknown"],
+        label: "adopt-worktrees",
+        detail: "unknown flag '--unknown'",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const output = captureOutput();
+
+      expect(runCli(testCase.args, output.io, createCliDependencies())).toBe(1);
+      expect(output.stdout()).toBe("");
+      expect(output.stderr()).toBe(
+        `project ${testCase.label}: ${testCase.detail}\nRun 'project --help' for usage.\n`,
+      );
+    }
+  });
+
+  it("renders help from every command-table entry", () => {
+    const output = captureOutput();
+
+    expect(runCli(["--help"], output.io, createCliDependencies())).toBe(0);
+    expect(output.stdout()).toBe(HELP_TEXT);
+    for (const command of COMMAND_HELP) {
+      expect(output.stdout()).toContain(command.usage);
+      expect(output.stdout()).toContain(command.description);
+      for (const flag of command.flags) expect(output.stdout()).toContain(flag);
+    }
+  });
+
+  it("pins the default prompt fallback when prompt is unavailable", () => {
+    const global = globalThis as unknown as {
+      prompt: ((message?: string) => string | null) | undefined;
+    };
+    const originalPrompt = global.prompt;
+    global.prompt = undefined;
+
+    try {
+      const dependencies = defaultDependencies({ PROJECT_PLATFORM: "darwin" });
+
+      expect(dependencies.readLine("Branch name: ")).toBe("");
+      expect(dependencies.readLine()).toBe("q");
+    } finally {
+      global.prompt = originalPrompt;
+    }
   });
 
   it("rejects an invalid platform before dispatching any command", () => {

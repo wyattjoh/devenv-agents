@@ -6,14 +6,21 @@ import {
   defaultProjectRoots,
   enumerateProjects,
   runProjectAdd,
+  type ProjectAddResult,
   type ProjectPlatform,
 } from "./project-add.ts";
-import { formatProjectUpdate, runProjectUpdate } from "./project-update.ts";
+import {
+  formatProjectUpdate,
+  runProjectUpdate,
+  type ProjectUpdateResult,
+} from "./project-update.ts";
 import {
   formatAdoptWorktrees,
   formatProjectGc,
   runAdoptWorktrees,
   runProjectGc,
+  type AdoptWorktreesResult,
+  type ProjectGcResult,
 } from "./project-gc.ts";
 import {
   createWorktreeBootstrap,
@@ -27,6 +34,8 @@ import {
   runPluginInstall,
   runWorktreeEvent,
   type PluginEnvironment,
+  type PluginInstallResult,
+  type WorktreeEventResult,
 } from "./worktree-plugin.ts";
 import { createSyncReferences, runProjectSync, type SyncReferences } from "./project-sync.ts";
 
@@ -65,36 +74,6 @@ export type HostConfiguration = {
   readonly eventJson: string | undefined;
   readonly workspaceId: string | undefined;
 };
-
-/**
- * The help text for the project CLI.
- */
-export const HELP_TEXT = `Usage: ${PROJECT_NAME} [options]
-
-Project lifecycle tooling for devenv and Herdr worktrees.
-
-Commands:
-  add <repo> [options]           Add and prepare a project checkout
-      --from <template>          Bind a bundled devenv template
-      --local                    Register without a systemd session
-      --host <name>              Host used in printed attachment snippets
-  worktree-setup [--interactive]  Bootstrap the current worktree
-  wt create <branch> [options]  Create and bootstrap a worktree
-      --base <ref>              Create from a base ref
-      --no-focus                Leave the new workspace unfocused
-      --json                    Print workspace and pane ids as JSON
-  wt new                        Prompt for and create a focused worktree
-  sync                           Materialize declared project references
-  wt on-event                    Handle a Herdr worktree event
-  plugin install                 Link the Herdr worktree plugin
-  update [--all]                 Refresh and rebuild project environments
-  gc [--all] [--dry-run]          Review or collect stale worktrees
-  adopt-worktrees [--all]        Bootstrap registered worktrees
-
-Options:
-  -h, --help     Show this help message
-  -v, --version  Show the version
-`;
 
 const processIO: CliIO = {
   stdout: (text) => process.stdout.write(text),
@@ -228,48 +207,236 @@ const printUnknown = (output: CliIO, argument: string): number => {
   return 1;
 };
 
-const runWorktreeSetupCommand = (
-  output: CliIO,
-  dependencies: CliDependencies,
-  interactive: boolean,
-): number => {
-  const reportFailure = (result: WorktreeBootstrapResult): void => {
-    output.stderr(`${PROJECT_NAME} worktree-setup: ${result.error ?? "setup failed"}\n`);
-    if (interactive) output.stderr("Press Enter to retry or q to quit.\n");
-  };
-
-  try {
-    const result = dependencies.bootstrap.run({
-      allowCompleted: true,
-      io: interactive
-        ? {
-            onFailure: reportFailure,
-            readLine: dependencies.readLine,
-          }
-        : undefined,
-      mainCheckout: undefined,
-      worktreePath: dependencies.cwd ?? process.cwd(),
-    });
-    if (result.exitCode !== 0 && !interactive) reportFailure(result);
-    return result.exitCode;
-  } catch (error) {
-    const message = errorMessage(error);
-    output.stderr(`${PROJECT_NAME} worktree-setup: ${message}\n`);
-    return 1;
-  }
+type FlagSpec = {
+  readonly name: string;
+  readonly takesValue: boolean;
+  readonly valueName: string | undefined;
+  readonly description: string;
 };
 
-const runWorktreeEventCommand = (
-  dependencies: CliDependencies,
-  hostConfiguration: HostConfiguration,
-): number =>
-  runWorktreeEvent({
-    eventJson: hostConfiguration.eventJson,
-    workspaceId: hostConfiguration.workspaceId,
-    bootstrap: dependencies.bootstrap,
-    herdrClient: dependencies.herdrClient,
-    runner: dependencies.runner,
-  }).exitCode;
+type PositionalSpec = {
+  readonly name: string;
+  readonly usageName: string;
+  readonly required: boolean;
+  readonly missingMessage: string | undefined;
+};
+
+type ParsedCommandArguments = {
+  readonly positionals: readonly string[];
+  readonly flags: Readonly<Record<string, string | boolean>>;
+};
+
+type CommandContext = {
+  readonly arguments: ParsedCommandArguments;
+  readonly dependencies: CliDependencies;
+  readonly hostConfiguration: HostConfiguration;
+  readonly output: CliIO;
+  readonly pluginPath: string;
+  readonly projectPath: string;
+  readonly projectName: string | undefined;
+};
+
+type CommandExecution<Result> = {
+  readonly exitCode: number;
+  readonly result: Result;
+  readonly stderr: string;
+};
+
+type LegacyHelpLayout = "standard" | "compact" | "expanded";
+
+type CommandMetadata = {
+  readonly tokens: readonly string[];
+  readonly positionals: readonly PositionalSpec[];
+  readonly flags: readonly FlagSpec[];
+  readonly forEachProject: boolean;
+  readonly description: string;
+  readonly helpLayout: LegacyHelpLayout;
+};
+
+type CommandDefinition<Result> = CommandMetadata & {
+  readonly run: (context: CommandContext) => CommandExecution<Result>;
+  readonly format: (result: Result, context: CommandContext) => string;
+};
+
+type FormattedCommandExecution = {
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+};
+
+type CommandEntry = CommandMetadata & {
+  readonly execute: (context: CommandContext) => FormattedCommandExecution;
+};
+
+class ArgumentParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ArgumentParseError";
+  }
+}
+
+const booleanFlag = (name: string, description: string): FlagSpec => ({
+  name,
+  takesValue: false,
+  valueName: undefined,
+  description,
+});
+
+const valueFlag = (name: string, valueName: string, description: string): FlagSpec => ({
+  name,
+  takesValue: true,
+  valueName,
+  description,
+});
+
+const commandExecution = <Result>(
+  result: Result,
+  exitCode = 0,
+  stderr = "",
+): CommandExecution<Result> => ({
+  result,
+  exitCode,
+  stderr,
+});
+
+const booleanFlagValue = (arguments_: ParsedCommandArguments, name: string): boolean =>
+  arguments_.flags[name] === true;
+
+const stringFlagValue = (arguments_: ParsedCommandArguments, name: string): string | undefined => {
+  const value = arguments_.flags[name];
+  return typeof value === "string" ? value : undefined;
+};
+
+const flagFor = (entry: CommandEntry, name: string): FlagSpec | undefined =>
+  entry.flags.find((flag) => flag.name === name);
+
+const parseCommandArguments = (
+  entry: CommandEntry,
+  args: readonly string[],
+): ParsedCommandArguments => {
+  const flags: Record<string, string | boolean> = {};
+  const positionals: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === undefined) continue;
+
+    if (argument.startsWith("--")) {
+      const spec = flagFor(entry, argument);
+      if (spec === undefined) throw new ArgumentParseError(`unknown flag '${argument}'`);
+      if (flags[spec.name] !== undefined) {
+        throw new ArgumentParseError(`flag '${argument}' may only be specified once`);
+      }
+      if (!spec.takesValue) {
+        flags[spec.name] = true;
+        continue;
+      }
+
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        throw new ArgumentParseError(`flag '${argument}' requires a value`);
+      }
+      flags[spec.name] = value;
+      index += 1;
+      continue;
+    }
+
+    if (positionals.length >= entry.positionals.length) {
+      throw new ArgumentParseError(`unknown argument '${argument}'`);
+    }
+    positionals.push(argument);
+  }
+
+  for (const [index, positional] of entry.positionals.entries()) {
+    if (positional.required && positionals[index] === undefined) {
+      throw new ArgumentParseError(positional.missingMessage ?? `${positional.name} is required`);
+    }
+  }
+
+  return { positionals, flags };
+};
+
+const commandLabel = (entry: CommandEntry): string => entry.tokens.join(" ");
+
+const printArgumentError = (output: CliIO, entry: CommandEntry, error: unknown): number => {
+  output.stderr(`${PROJECT_NAME} ${commandLabel(entry)}: ${errorMessage(error)}\n`);
+  output.stderr(`Run '${PROJECT_NAME} --help' for usage.\n`);
+  return 1;
+};
+
+const printCommandError = (output: CliIO, entry: CommandEntry, error: unknown): number => {
+  output.stderr(`${PROJECT_NAME} ${commandLabel(entry)}: ${errorMessage(error)}\n`);
+  return 1;
+};
+
+const requiredPositional = (context: CommandContext, index: number, name: string): string => {
+  const value = context.arguments.positionals[index];
+  if (value === undefined) throw new Error(`${name} is required`);
+  return value;
+};
+
+const runWorktreeSetupCommand = (
+  context: CommandContext,
+): CommandExecution<WorktreeBootstrapResult> => {
+  const interactive = booleanFlagValue(context.arguments, "--interactive");
+  const reportFailure = (result: WorktreeBootstrapResult): void => {
+    context.output.stderr(`${PROJECT_NAME} worktree-setup: ${result.error ?? "setup failed"}\n`);
+    if (interactive) context.output.stderr("Press Enter to retry or q to quit.\n");
+  };
+
+  const result = context.dependencies.bootstrap.run({
+    allowCompleted: true,
+    io: interactive
+      ? {
+          onFailure: reportFailure,
+          readLine: context.dependencies.readLine,
+        }
+      : undefined,
+    mainCheckout: undefined,
+    worktreePath: context.dependencies.cwd ?? process.cwd(),
+  });
+  if (result.exitCode !== 0 && !interactive) reportFailure(result);
+  return commandExecution(result, result.exitCode);
+};
+
+const worktreeCreateExecution = (
+  context: CommandContext,
+  branch: string,
+  focus: boolean,
+): CommandExecution<WorktreeCreateResult> =>
+  commandExecution(
+    runWorktreeCreate({
+      base: stringFlagValue(context.arguments, "--base"),
+      branch,
+      bootstrap: context.dependencies.bootstrap,
+      deadline: worktreeBootstrapDeadline(context.dependencies.now),
+      cwd: context.dependencies.cwd ?? process.cwd(),
+      focus,
+      herdrClient: context.dependencies.herdrClient,
+      noFocus: booleanFlagValue(context.arguments, "--no-focus"),
+      runner: context.dependencies.runner,
+      sleep: undefined,
+    }),
+  );
+
+const runWorktreeCreateCommand = (
+  context: CommandContext,
+): CommandExecution<WorktreeCreateResult> =>
+  worktreeCreateExecution(context, requiredPositional(context, 0, "branch name"), false);
+
+const runWorktreeNewCommand = (
+  context: CommandContext,
+): CommandExecution<WorktreeCreateResult | undefined> => {
+  const branch = context.dependencies.readLine(BRANCH_PROMPT).trim();
+  if (branch.length === 0) {
+    return commandExecution<WorktreeCreateResult | undefined>(
+      undefined,
+      1,
+      `${PROJECT_NAME} wt new: branch name is required\n`,
+    );
+  }
+  return worktreeCreateExecution(context, branch, true);
+};
 
 const worktreeCreateOutput = (result: WorktreeCreateResult, json: boolean): string => {
   if (json) {
@@ -281,359 +448,412 @@ const worktreeCreateOutput = (result: WorktreeCreateResult, json: boolean): stri
   return `Workspace ID: ${result.workspaceId}\nRoot pane ID: ${result.rootPaneId}\n`;
 };
 
-const runWorktreeCreateCommand = (
-  output: CliIO,
-  dependencies: CliDependencies,
-  args: readonly string[],
-  focus: boolean,
-): number => {
-  let branch: string | undefined;
-  let base: string | undefined;
-  let json = false;
-  let noFocus = false;
-
-  if (args.length === 0 || args[0]?.startsWith("--")) {
-    output.stderr(`${PROJECT_NAME} wt create: branch name is required\n`);
-    return 1;
-  }
-  branch = args[0];
-  for (let index = 1; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--base") {
-      const value = args[index + 1];
-      if (value === undefined || value.startsWith("--")) {
-        output.stderr(`${PROJECT_NAME} wt create: --base requires a ref\n`);
-        return 1;
-      }
-      base = value;
-      index += 1;
-      continue;
-    }
-    if (argument === "--no-focus") {
-      noFocus = true;
-      continue;
-    }
-    if (argument === "--json") {
-      json = true;
-      continue;
-    }
-    return printUnknown(output, argument ?? "wt");
-  }
-
-  try {
-    const result = runWorktreeCreate({
-      base,
-      branch,
-      bootstrap: dependencies.bootstrap,
-      deadline: worktreeBootstrapDeadline(dependencies.now),
-      cwd: dependencies.cwd ?? process.cwd(),
-      focus,
-      herdrClient: dependencies.herdrClient,
-      noFocus,
-      runner: dependencies.runner,
-      sleep: undefined,
-    });
-    output.stdout(worktreeCreateOutput(result, json));
-    return 0;
-  } catch (error) {
-    const message = errorMessage(error);
-    output.stderr(`${PROJECT_NAME} wt create: ${message}\n`);
-    return 1;
-  }
-};
-
-const runWorktreeNewCommand = (output: CliIO, dependencies: CliDependencies): number => {
-  const branch = dependencies.readLine(BRANCH_PROMPT).trim();
-  if (branch.length === 0) {
-    output.stderr(`${PROJECT_NAME} wt new: branch name is required\n`);
-    return 1;
-  }
-  return runWorktreeCreateCommand(output, dependencies, [branch], true);
-};
+const formatWorktreeCreate = (
+  result: WorktreeCreateResult | undefined,
+  context: CommandContext,
+): string =>
+  result === undefined
+    ? ""
+    : worktreeCreateOutput(result, booleanFlagValue(context.arguments, "--json"));
 
 const runProjectUpdateCommand = (
-  output: CliIO,
-  dependencies: CliDependencies,
-  hostConfiguration: HostConfiguration,
-  args: readonly string[],
-): number => {
-  let all = false;
-  for (const argument of args) {
-    if (argument === "--all" && !all) {
-      all = true;
-      continue;
-    }
-    return printUnknown(output, argument ?? "update");
-  }
-
-  try {
-    if (!all) {
-      const result = runProjectUpdate({
-        projectPath: dependencies.cwd ?? process.cwd(),
-        runner: dependencies.runner,
-      });
-      output.stdout(formatProjectUpdate(result));
-      return result.exitCode;
-    }
-
-    const projects = enumerateProjects({
-      platform: hostConfiguration.platform,
-      homeDirectory: hostConfiguration.homeDirectory,
-      projectsFile: hostConfiguration.projectsFile,
-      systemdUserDirectory: hostConfiguration.systemdUserDirectory,
-    });
-    let exitCode = 0;
-    for (const project of projects) {
-      try {
-        const result = runProjectUpdate({ projectPath: project.path, runner: dependencies.runner });
-        output.stdout(formatProjectUpdate(result, project.repo));
-        if (result.exitCode !== 0) exitCode = 1;
-      } catch (error) {
-        const message = errorMessage(error);
-        output.stderr(`[${project.repo}] ${PROJECT_NAME} update: ${message}\n`);
-        exitCode = 1;
-      }
-    }
-    return exitCode;
-  } catch (error) {
-    const message = errorMessage(error);
-    output.stderr(`${PROJECT_NAME} update: ${message}\n`);
-    return 1;
-  }
+  context: CommandContext,
+): CommandExecution<ProjectUpdateResult> => {
+  const result = runProjectUpdate({
+    projectPath: context.projectPath,
+    runner: context.dependencies.runner,
+  });
+  return commandExecution(result, result.exitCode);
 };
 
-const runProjectGcCommand = (
-  output: CliIO,
-  dependencies: CliDependencies,
-  hostConfiguration: HostConfiguration,
-  args: readonly string[],
-): number => {
-  let all = false;
-  let dryRun = false;
-  for (const argument of args) {
-    if (argument === "--all" && !all) {
-      all = true;
-      continue;
-    }
-    if (argument === "--dry-run" && !dryRun) {
-      dryRun = true;
-      continue;
-    }
-    return printUnknown(output, argument ?? "gc");
-  }
+const formatProjectUpdateCommand = (result: ProjectUpdateResult, context: CommandContext): string =>
+  formatProjectUpdate(result, context.projectName);
 
-  try {
-    if (!all) {
-      const result = runProjectGc({
-        bootstrap: dependencies.bootstrap,
-        buildDirectories: undefined,
-        dryRun,
-        herdrClient: dependencies.herdrClient,
-        projectPath: dependencies.cwd ?? process.cwd(),
-        runner: dependencies.runner,
-      });
-      output.stdout(formatProjectGc(result));
-      return result.exitCode;
-    }
-
-    const projects = enumerateProjects({
-      platform: hostConfiguration.platform,
-      homeDirectory: hostConfiguration.homeDirectory,
-      projectsFile: hostConfiguration.projectsFile,
-      systemdUserDirectory: hostConfiguration.systemdUserDirectory,
-    });
-    let exitCode = 0;
-    for (const project of projects) {
-      try {
-        const result = runProjectGc({
-          bootstrap: dependencies.bootstrap,
-          buildDirectories: undefined,
-          dryRun,
-          herdrClient: dependencies.herdrClient,
-          projectPath: project.path,
-          runner: dependencies.runner,
-        });
-        output.stdout(formatProjectGc(result, project.repo));
-        if (result.exitCode !== 0) exitCode = 1;
-      } catch (error) {
-        const message = errorMessage(error);
-        output.stderr(`[${project.repo}] ${PROJECT_NAME} gc: ${message}\n`);
-        exitCode = 1;
-      }
-    }
-    return exitCode;
-  } catch (error) {
-    const message = errorMessage(error);
-    output.stderr(`${PROJECT_NAME} gc: ${message}\n`);
-    return 1;
-  }
+const runProjectGcCommand = (context: CommandContext): CommandExecution<ProjectGcResult> => {
+  const result = runProjectGc({
+    bootstrap: context.dependencies.bootstrap,
+    buildDirectories: undefined,
+    dryRun: booleanFlagValue(context.arguments, "--dry-run"),
+    herdrClient: context.dependencies.herdrClient,
+    projectPath: context.projectPath,
+    runner: context.dependencies.runner,
+  });
+  return commandExecution(result, result.exitCode);
 };
+
+const formatProjectGcCommand = (result: ProjectGcResult, context: CommandContext): string =>
+  formatProjectGc(result, context.projectName);
 
 const runAdoptWorktreesCommand = (
-  output: CliIO,
-  dependencies: CliDependencies,
-  hostConfiguration: HostConfiguration,
-  args: readonly string[],
-): number => {
-  let all = false;
-  for (const argument of args) {
-    if (argument === "--all" && !all) {
-      all = true;
-      continue;
-    }
-    return printUnknown(output, argument ?? "adopt-worktrees");
-  }
-
-  try {
-    if (!all) {
-      const result = runAdoptWorktrees({
-        bootstrap: dependencies.bootstrap,
-        herdrClient: dependencies.herdrClient,
-        projectPath: dependencies.cwd ?? process.cwd(),
-        runner: dependencies.runner,
-      });
-      output.stdout(formatAdoptWorktrees(result));
-      return result.exitCode;
-    }
-
-    const projects = enumerateProjects({
-      platform: hostConfiguration.platform,
-      homeDirectory: hostConfiguration.homeDirectory,
-      projectsFile: hostConfiguration.projectsFile,
-      systemdUserDirectory: hostConfiguration.systemdUserDirectory,
-    });
-    let exitCode = 0;
-    for (const project of projects) {
-      try {
-        const result = runAdoptWorktrees({
-          bootstrap: dependencies.bootstrap,
-          herdrClient: dependencies.herdrClient,
-          projectPath: project.path,
-          runner: dependencies.runner,
-        });
-        output.stdout(formatAdoptWorktrees(result, project.repo));
-        if (result.exitCode !== 0) exitCode = 1;
-      } catch (error) {
-        const message = errorMessage(error);
-        output.stderr(`[${project.repo}] ${PROJECT_NAME} adopt-worktrees: ${message}\n`);
-        exitCode = 1;
-      }
-    }
-    return exitCode;
-  } catch (error) {
-    const message = errorMessage(error);
-    output.stderr(`${PROJECT_NAME} adopt-worktrees: ${message}\n`);
-    return 1;
-  }
+  context: CommandContext,
+): CommandExecution<AdoptWorktreesResult> => {
+  const result = runAdoptWorktrees({
+    bootstrap: context.dependencies.bootstrap,
+    herdrClient: context.dependencies.herdrClient,
+    projectPath: context.projectPath,
+    runner: context.dependencies.runner,
+  });
+  return commandExecution(result, result.exitCode);
 };
 
-const runProjectAddCommand = (
-  output: CliIO,
-  dependencies: CliDependencies,
-  hostConfiguration: HostConfiguration,
-  args: readonly string[],
-): number => {
-  let repository: string | undefined;
-  let from: string | undefined;
-  let local = false;
-  let host: string | undefined;
+const formatAdoptWorktreesCommand = (
+  result: AdoptWorktreesResult,
+  context: CommandContext,
+): string => formatAdoptWorktrees(result, context.projectName);
 
-  for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--from") {
-      const value = args[index + 1];
-      if (value === undefined || value.startsWith("--")) {
-        output.stderr(`${PROJECT_NAME} add: --from requires a template\n`);
-        return 1;
-      }
-      from = value;
-      index += 1;
-      continue;
-    }
-    if (argument === "--local") {
-      local = true;
-      continue;
-    }
-    if (argument === "--host") {
-      const value = args[index + 1];
-      if (value === undefined || value.startsWith("--")) {
-        output.stderr(`${PROJECT_NAME} add: --host requires a host name\n`);
-        return 1;
-      }
-      host = value;
-      index += 1;
-      continue;
-    }
-    if (argument?.startsWith("--")) return printUnknown(output, argument);
-    if (repository !== undefined) return printUnknown(output, argument ?? "add");
-    repository = argument;
-  }
+const runProjectAddCommand = (context: CommandContext): CommandExecution<ProjectAddResult> =>
+  commandExecution(
+    runProjectAdd({
+      repository: requiredPositional(context, 0, "repository"),
+      from: stringFlagValue(context.arguments, "--from"),
+      local: booleanFlagValue(context.arguments, "--local"),
+      platform: context.hostConfiguration.platform,
+      homeDirectory: context.hostConfiguration.homeDirectory,
+      codeRoot: context.hostConfiguration.codeRoot,
+      projectsFile: context.hostConfiguration.projectsFile,
+      systemdUserDirectory: context.hostConfiguration.systemdUserDirectory,
+      templateRoot: context.hostConfiguration.templateRoot,
+      host: stringFlagValue(context.arguments, "--host") ?? context.hostConfiguration.host,
+      user: context.hostConfiguration.user,
+      herdrClient: context.dependencies.herdrClient,
+      runner: context.dependencies.runner,
+      syncReferences: context.dependencies.syncReferences,
+    }),
+  );
 
-  if (repository === undefined) {
-    output.stderr(`${PROJECT_NAME} add: repository is required\n`);
-    return 1;
-  }
+const formatProjectAdd = (result: ProjectAddResult): string => result.instructions;
 
-  try {
-    const result = runProjectAdd({
-      repository,
-      from,
-      local,
-      platform: hostConfiguration.platform,
-      homeDirectory: hostConfiguration.homeDirectory,
-      codeRoot: hostConfiguration.codeRoot,
-      projectsFile: hostConfiguration.projectsFile,
-      systemdUserDirectory: hostConfiguration.systemdUserDirectory,
-      templateRoot: hostConfiguration.templateRoot,
-      host: host ?? hostConfiguration.host,
-      user: hostConfiguration.user,
-      herdrClient: dependencies.herdrClient,
-      runner: dependencies.runner,
-      syncReferences: dependencies.syncReferences,
-    });
-    output.stdout(result.instructions);
-    return 0;
-  } catch (error) {
-    const message = errorMessage(error);
-    output.stderr(`${PROJECT_NAME} add: ${message}\n`);
-    return 1;
-  }
+const runSyncCommand = (context: CommandContext): CommandExecution<void> => {
+  runProjectSync({
+    runner: context.dependencies.runner,
+    syncReferences: context.dependencies.syncReferences,
+    worktreePath: context.projectPath,
+  });
+  return commandExecution(undefined);
 };
 
-const runSyncCommand = (output: CliIO, dependencies: CliDependencies): number => {
-  try {
-    runProjectSync({
-      runner: dependencies.runner,
-      syncReferences: dependencies.syncReferences,
-      worktreePath: dependencies.cwd ?? process.cwd(),
-    });
-    return 0;
-  } catch (error) {
-    const message = errorMessage(error);
-    output.stderr(`${PROJECT_NAME} sync: ${message}\n`);
-    return 1;
-  }
+const runWorktreeEventCommand = (
+  context: CommandContext,
+): CommandExecution<WorktreeEventResult> => {
+  const result = runWorktreeEvent({
+    eventJson: context.hostConfiguration.eventJson,
+    workspaceId: context.hostConfiguration.workspaceId,
+    bootstrap: context.dependencies.bootstrap,
+    herdrClient: context.dependencies.herdrClient,
+    runner: context.dependencies.runner,
+  });
+  return commandExecution(result, result.exitCode);
 };
 
-const runPluginInstallCommand = (
-  output: CliIO,
-  dependencies: CliDependencies,
-  pluginPath: string,
-): number => {
-  try {
-    const result = runPluginInstall({
-      herdrClient: dependencies.herdrClient,
-      pluginPath,
-    });
-    if (result.action !== "unchanged") {
-      output.stdout(`${PROJECT_PLUGIN_ID}: ${result.action}\n`);
+const runPluginInstallCommand = (context: CommandContext): CommandExecution<PluginInstallResult> =>
+  commandExecution(
+    runPluginInstall({
+      herdrClient: context.dependencies.herdrClient,
+      pluginPath: context.pluginPath,
+    }),
+  );
+
+const formatPluginInstall = (result: PluginInstallResult): string =>
+  result.action === "unchanged" ? "" : `${PROJECT_PLUGIN_ID}: ${result.action}\n`;
+
+const formatWorktreeSetup = (_result: WorktreeBootstrapResult): string => "";
+
+const formatSync = (_result: void): string => "";
+
+const formatWorktreeEvent = (_result: WorktreeEventResult): string => "";
+
+const formatCommandExecution = <Result>(
+  definition: CommandDefinition<Result>,
+  context: CommandContext,
+): FormattedCommandExecution => {
+  const execution = definition.run(context);
+  return {
+    exitCode: execution.exitCode,
+    stdout: definition.format(execution.result, context),
+    stderr: execution.stderr,
+  };
+};
+
+const runAllProjects = <Result>(
+  definition: CommandDefinition<Result>,
+  context: CommandContext,
+): FormattedCommandExecution => {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  let exitCode = 0;
+  const projects = enumerateProjects({
+    platform: context.hostConfiguration.platform,
+    homeDirectory: context.hostConfiguration.homeDirectory,
+    projectsFile: context.hostConfiguration.projectsFile,
+    systemdUserDirectory: context.hostConfiguration.systemdUserDirectory,
+  });
+  for (const project of projects) {
+    const projectContext: CommandContext = {
+      ...context,
+      projectName: project.repo,
+      projectPath: project.path,
+    };
+    try {
+      const execution = definition.run(projectContext);
+      stdout.push(definition.format(execution.result, projectContext));
+      if (execution.stderr.length > 0) stderr.push(execution.stderr);
+      if (execution.exitCode !== 0) exitCode = 1;
+    } catch (error) {
+      stderr.push(
+        `[${project.repo}] ${PROJECT_NAME} ${definition.tokens.join(" ")}: ${errorMessage(error)}\n`,
+      );
+      exitCode = 1;
     }
-    return result.exitCode;
-  } catch (error) {
-    const message = errorMessage(error);
-    output.stderr(`${PROJECT_NAME} plugin install: ${message}\n`);
-    return 1;
   }
+  return { exitCode, stdout: stdout.join(""), stderr: stderr.join("") };
+};
+
+const executeCommand = <Result>(
+  definition: CommandDefinition<Result>,
+  context: CommandContext,
+): FormattedCommandExecution =>
+  definition.forEachProject && booleanFlagValue(context.arguments, "--all")
+    ? runAllProjects(definition, context)
+    : formatCommandExecution(definition, context);
+
+const command = <Result>(definition: CommandDefinition<Result>): CommandEntry => ({
+  tokens: definition.tokens,
+  positionals: definition.positionals,
+  flags: definition.flags,
+  forEachProject: definition.forEachProject,
+  description: definition.description,
+  helpLayout: definition.helpLayout,
+  execute: (context) => executeCommand(definition, context),
+});
+
+const commandTable: readonly CommandEntry[] = [
+  command<ProjectAddResult>({
+    tokens: ["add"],
+    positionals: [
+      {
+        name: "repository",
+        usageName: "repo",
+        required: true,
+        missingMessage: "repository is required",
+      },
+    ],
+    flags: [
+      valueFlag("--from", "template", "Bind a bundled devenv template"),
+      booleanFlag("--local", "Register without a systemd session"),
+      valueFlag("--host", "name", "Host used in printed attachment snippets"),
+    ],
+    forEachProject: false,
+    description: "Add and prepare a project checkout",
+    helpLayout: "standard",
+    run: runProjectAddCommand,
+    format: formatProjectAdd,
+  }),
+  command<WorktreeBootstrapResult>({
+    tokens: ["worktree-setup"],
+    positionals: [],
+    flags: [booleanFlag("--interactive", "Retry setup failures interactively")],
+    forEachProject: false,
+    description: "Bootstrap the current worktree",
+    helpLayout: "expanded",
+    run: runWorktreeSetupCommand,
+    format: formatWorktreeSetup,
+  }),
+  command<WorktreeCreateResult>({
+    tokens: ["wt", "create"],
+    positionals: [
+      {
+        name: "branch",
+        usageName: "branch",
+        required: true,
+        missingMessage: "branch name is required",
+      },
+    ],
+    flags: [
+      valueFlag("--base", "ref", "Create from a base ref"),
+      booleanFlag("--no-focus", "Leave the new workspace unfocused"),
+      booleanFlag("--json", "Print workspace and pane ids as JSON"),
+    ],
+    forEachProject: false,
+    description: "Create and bootstrap a worktree",
+    helpLayout: "compact",
+    run: runWorktreeCreateCommand,
+    format: formatWorktreeCreate,
+  }),
+  command<WorktreeCreateResult | undefined>({
+    tokens: ["wt", "new"],
+    positionals: [],
+    flags: [],
+    forEachProject: false,
+    description: "Prompt for and create a focused worktree",
+    helpLayout: "compact",
+    run: runWorktreeNewCommand,
+    format: formatWorktreeCreate,
+  }),
+  command<void>({
+    tokens: ["sync"],
+    positionals: [],
+    flags: [],
+    forEachProject: false,
+    description: "Materialize declared project references",
+    helpLayout: "standard",
+    run: runSyncCommand,
+    format: formatSync,
+  }),
+  command<WorktreeEventResult>({
+    tokens: ["wt", "on-event"],
+    positionals: [],
+    flags: [],
+    forEachProject: false,
+    description: "Handle a Herdr worktree event",
+    helpLayout: "standard",
+    run: runWorktreeEventCommand,
+    format: formatWorktreeEvent,
+  }),
+  command<PluginInstallResult>({
+    tokens: ["plugin", "install"],
+    positionals: [],
+    flags: [],
+    forEachProject: false,
+    description: "Link the Herdr worktree plugin",
+    helpLayout: "standard",
+    run: runPluginInstallCommand,
+    format: formatPluginInstall,
+  }),
+  command<ProjectUpdateResult>({
+    tokens: ["update"],
+    positionals: [],
+    flags: [booleanFlag("--all", "Refresh and rebuild every registered project")],
+    forEachProject: true,
+    description: "Refresh and rebuild project environments",
+    helpLayout: "standard",
+    run: runProjectUpdateCommand,
+    format: formatProjectUpdateCommand,
+  }),
+  command<ProjectGcResult>({
+    tokens: ["gc"],
+    positionals: [],
+    flags: [
+      booleanFlag("--all", "Review or collect worktrees in every registered project"),
+      booleanFlag("--dry-run", "Review stale worktrees without changing them"),
+    ],
+    forEachProject: true,
+    description: "Review or collect stale worktrees",
+    helpLayout: "expanded",
+    run: runProjectGcCommand,
+    format: formatProjectGcCommand,
+  }),
+  command<AdoptWorktreesResult>({
+    tokens: ["adopt-worktrees"],
+    positionals: [],
+    flags: [booleanFlag("--all", "Bootstrap every registered project's worktrees")],
+    forEachProject: true,
+    description: "Bootstrap registered worktrees",
+    helpLayout: "standard",
+    run: runAdoptWorktreesCommand,
+    format: formatAdoptWorktreesCommand,
+  }),
+];
+
+const commandUsage = (entry: CommandEntry): string => {
+  const positionals = entry.positionals.map((positional) =>
+    positional.required ? `<${positional.usageName}>` : `[${positional.usageName}]`,
+  );
+  const flags =
+    entry.flags.length === 0
+      ? []
+      : entry.flags.some((flag) => flag.takesValue)
+        ? ["[options]"]
+        : entry.flags.map((flag) => `[${flag.name}]`);
+  return [...entry.tokens, ...positionals, ...flags].join(" ");
+};
+
+/**
+ * Structured help metadata derived from the private command table.
+ */
+export type CommandHelp = {
+  readonly usage: string;
+  readonly description: string;
+  readonly flags: readonly string[];
+};
+
+/**
+ * The command metadata rendered by the CLI help output.
+ */
+export const COMMAND_HELP: readonly CommandHelp[] = commandTable.map((entry) => ({
+  usage: commandUsage(entry),
+  description: entry.description,
+  flags: entry.flags.map((flag) =>
+    flag.valueName === undefined ? flag.name : `${flag.name} <${flag.valueName}>`,
+  ),
+}));
+
+/**
+ * The prior literal help used three command-line description columns. Keep those
+ * compatibility values centralized while entries select the legacy layout.
+ */
+const HELP_DESCRIPTION_COLUMNS: Readonly<Record<LegacyHelpLayout, number>> = {
+  standard: 33,
+  compact: 32,
+  expanded: 34,
+};
+
+const formatHelpLine = (label: string, description: string, descriptionColumn: number): string =>
+  `${label.padEnd(Math.max(descriptionColumn, label.length + 1))}${description}`;
+
+type HelpLine = readonly [label: string, description: string];
+
+/**
+ * Preserve the historical option spacing while keeping its alignment derived.
+ */
+const formatOptionLines = (lines: readonly HelpLine[]): string[] => {
+  const descriptionColumn = Math.max(...lines.map(([label]) => label.length + 2));
+  return lines.map(([label, description]) => formatHelpLine(label, description, descriptionColumn));
+};
+
+const renderHelp = (entries: readonly CommandEntry[]): string => {
+  const lines = [
+    `Usage: ${PROJECT_NAME} [options]`,
+    "",
+    "Project lifecycle tooling for devenv and Herdr worktrees.",
+    "",
+    "Commands:",
+  ];
+  for (const entry of entries) {
+    const descriptionColumn = HELP_DESCRIPTION_COLUMNS[entry.helpLayout];
+    lines.push(formatHelpLine(`  ${commandUsage(entry)}`, entry.description, descriptionColumn));
+    if (entry.flags.some((flag) => flag.takesValue)) {
+      for (const flag of entry.flags) {
+        const value = flag.valueName === undefined ? "" : ` <${flag.valueName}>`;
+        lines.push(
+          formatHelpLine(`      ${flag.name}${value}`, flag.description, descriptionColumn),
+        );
+      }
+    }
+  }
+  lines.push(
+    "",
+    "Options:",
+    ...formatOptionLines([
+      ["  -h, --help", "Show this help message"],
+      ["  -v, --version", "Show the version"],
+    ]),
+  );
+  return `${lines.join("\n")}\n`;
+};
+
+/**
+ * The help text for the project CLI, rendered from the command table.
+ */
+export const HELP_TEXT = renderHelp(commandTable);
+
+const commandEntryFor = (args: readonly string[]): CommandEntry | undefined => {
+  let match: CommandEntry | undefined;
+  for (const entry of commandTable) {
+    if (args.length < entry.tokens.length) continue;
+    if (!entry.tokens.every((token, index) => args[index] === token)) continue;
+    if (match === undefined || entry.tokens.length > match.tokens.length) match = entry;
+  }
+  return match;
 };
 
 /**
@@ -670,61 +890,36 @@ export const runCli = (
     return 0;
   }
 
-  const command = args[0] ?? "";
+  const entry = commandEntryFor(args);
+  if (entry === undefined) return printUnknown(output, args[0] ?? "");
+
+  let parsedArguments: ParsedCommandArguments;
+  try {
+    parsedArguments = parseCommandArguments(entry, args.slice(entry.tokens.length));
+  } catch (error) {
+    return printArgumentError(output, entry, error);
+  }
+
   const resolvedDependencies =
     dependencies ?? createDefaultDependencies(hostConfiguration, environment, defaultCommandRunner);
-  if (command === "add") {
-    return runProjectAddCommand(output, resolvedDependencies, hostConfiguration, args.slice(1));
-  }
+  const context: CommandContext = {
+    arguments: parsedArguments,
+    dependencies: resolvedDependencies,
+    hostConfiguration,
+    output,
+    pluginPath,
+    projectName: undefined,
+    projectPath: resolvedDependencies.cwd ?? process.cwd(),
+  };
 
-  if (command === "update") {
-    return runProjectUpdateCommand(output, resolvedDependencies, hostConfiguration, args.slice(1));
+  try {
+    const execution = entry.execute(context);
+    if (execution.stdout.length > 0) output.stdout(execution.stdout);
+    if (execution.stderr.length > 0) output.stderr(execution.stderr);
+    return execution.exitCode;
+  } catch (error) {
+    return printCommandError(output, entry, error);
   }
-
-  if (command === "gc") {
-    return runProjectGcCommand(output, resolvedDependencies, hostConfiguration, args.slice(1));
-  }
-
-  if (command === "adopt-worktrees") {
-    return runAdoptWorktreesCommand(output, resolvedDependencies, hostConfiguration, args.slice(1));
-  }
-
-  if (command === "worktree-setup") {
-    const commandArguments = args.slice(1);
-    if (
-      commandArguments.length > 1 ||
-      (commandArguments.length === 1 && commandArguments[0] !== "--interactive")
-    ) {
-      return printUnknown(output, commandArguments[0] ?? command);
-    }
-    return runWorktreeSetupCommand(output, resolvedDependencies, commandArguments.length === 1);
-  }
-
-  if (command === "wt" && args[1] === "create") {
-    return runWorktreeCreateCommand(output, resolvedDependencies, args.slice(2), false);
-  }
-
-  if (command === "wt" && args[1] === "new") {
-    if (args.length !== 2) return printUnknown(output, args[2] ?? command);
-    return runWorktreeNewCommand(output, resolvedDependencies);
-  }
-
-  if (command === "sync") {
-    if (args.length !== 1) return printUnknown(output, args[1] ?? command);
-    return runSyncCommand(output, resolvedDependencies);
-  }
-
-  if (command === "wt" && args[1] === "on-event") {
-    if (args.length !== 2) return printUnknown(output, args[2] ?? command);
-    return runWorktreeEventCommand(resolvedDependencies, hostConfiguration);
-  }
-
-  if (command === "plugin" && args[1] === "install") {
-    if (args.length !== 2) return printUnknown(output, args[2] ?? command);
-    return runPluginInstallCommand(output, resolvedDependencies, pluginPath);
-  }
-
-  return printUnknown(output, command);
 };
 
 if (import.meta.main) {
