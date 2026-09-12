@@ -98,7 +98,6 @@ describe("project CLI", () => {
         `${mainCheckout}/.git\n`,
       ),
       devenv: result(0),
-      herdr: result(1, "", "no socket"),
     });
     const dependencies: CliDependencies = {
       cwd: worktreePath,
@@ -120,7 +119,6 @@ describe("project CLI", () => {
       ["devenv", "allow"],
       ["direnv", "allow"],
       ["devenv", "shell", "--", "true"],
-      ["herdr", "pane", "list"],
     ]);
   });
 

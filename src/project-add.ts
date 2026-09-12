@@ -17,6 +17,7 @@ import {
   runRequiredGitCommand,
   type CommandRunner,
 } from "./command-runner.ts";
+import type { HerdrClient } from "./herdr-client.ts";
 import { assertProjectPluginEnabled } from "./worktree-plugin.ts";
 import { readProjectDeclaration, type ProjectDeclaration } from "./project-declaration.ts";
 import type { SyncReferences } from "./worktree-setup.ts";
@@ -71,7 +72,7 @@ export type ProjectAddOptions = {
   readonly templateRoot: string;
   readonly host: string;
   readonly user: string;
-  readonly herdrPath: string | undefined;
+  readonly herdrClient: HerdrClient;
   readonly runner: CommandRunner;
   readonly syncReferences: SyncReferences;
 };
@@ -519,7 +520,7 @@ const registerProject = (
  * @returns The checkout, registration, and attachment instructions.
  */
 export const runProjectAdd = (options: ProjectAddOptions): ProjectAddResult => {
-  assertProjectPluginEnabled({ runner: options.runner, herdrPath: options.herdrPath });
+  assertProjectPluginEnabled(options.herdrClient);
   const repository = parseProjectRepository(options.repository);
   if (options.from !== undefined) templatePath(options.templateRoot, options.from);
   const codeRoot = resolve(

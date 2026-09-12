@@ -1,13 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import {
-  errorMessage,
-  runCommand,
-  runRequiredCommand,
-  type CommandResult,
-  type CommandRunner,
-} from "./command-runner.ts";
-import type { HerdrClient } from "./herdr-client.ts";
+import { errorMessage, type CommandRunner } from "./command-runner.ts";
+import type { HerdrClient, HerdrPlugin } from "./herdr-client.ts";
 import { PROJECT_DECLARATION_PATH } from "./project-declaration.ts";
 import { claimWorktreeStatus } from "./worktree-status.ts";
 import { canonicalPath, resolveMainCheckout, samePath } from "./workspace.ts";
@@ -38,7 +32,7 @@ export type PluginEnvironment = Readonly<Record<string, string | undefined>>;
 export type WorktreeEventOptions = {
   readonly eventJson: string | undefined;
   readonly workspaceId: string | undefined;
-  readonly herdrPath: string | undefined;
+  readonly herdrClient: HerdrClient;
   readonly runner: CommandRunner;
   readonly now: (() => string) | undefined;
 };
@@ -82,14 +76,6 @@ type JsonRecord = Record<string, unknown>;
 type PluginManifest = {
   readonly id: string;
   readonly version: string;
-};
-
-type ListedPlugin = {
-  readonly pluginId: string;
-  readonly enabled: boolean;
-  readonly pluginRoot: string | undefined;
-  readonly manifestPath: string | undefined;
-  readonly version: string | undefined;
 };
 
 const defaultNow = (): string => new Date().toISOString();
@@ -144,8 +130,6 @@ const workspaceIdFromPayload = (payload: JsonRecord | undefined): string | undef
   return candidates.find((candidate): candidate is string => candidate !== undefined);
 };
 
-const herdrCommand = (herdrPath: string | undefined): string => herdrPath ?? "herdr";
-
 const isDirectory = (path: string): boolean => {
   try {
     return statSync(path).isDirectory();
@@ -162,48 +146,12 @@ const hasProjectDeclaration = (mainCheckout: string): boolean => {
   }
 };
 
-const worktreesFromResponse = (stdout: string): readonly JsonRecord[] => {
-  let parsed: unknown;
+const pathFromWorkspace = (workspaceId: string, herdrClient: HerdrClient): string | undefined => {
   try {
-    parsed = JSON.parse(stdout) as unknown;
-  } catch (error) {
-    throw new Error("herdr worktree list returned invalid JSON", { cause: error });
-  }
-  if (!isRecord(parsed)) throw new Error("herdr worktree list returned an invalid envelope");
-  const result = readRecord(parsed, "result");
-  const worktrees = result?.worktrees;
-  if (!Array.isArray(worktrees)) throw new Error("herdr worktree list returned no worktrees");
-  return worktrees.filter(isRecord);
-};
-
-const pathFromWorkspace = (
-  workspaceId: string,
-  options: WorktreeEventOptions,
-): string | undefined => {
-  let response: CommandResult;
-  try {
-    response = runCommand(options.runner, herdrCommand(options.herdrPath), [
-      "worktree",
-      "list",
-      "--workspace",
-      workspaceId,
-    ]);
+    return herdrClient.resolveWorktree(workspaceId)?.path;
   } catch {
     return undefined;
   }
-  if (response.exitCode !== 0) return undefined;
-
-  let worktrees: readonly JsonRecord[];
-  try {
-    worktrees = worktreesFromResponse(response.stdout);
-  } catch {
-    return undefined;
-  }
-  const worktree = worktrees.find(
-    (candidate) =>
-      candidate.open_workspace_id === workspaceId && candidate.is_linked_worktree === true,
-  );
-  return worktree === undefined ? undefined : readString(worktree, "path");
 };
 
 const resolveEventWorktreePath = (options: WorktreeEventOptions): string | undefined => {
@@ -213,7 +161,7 @@ const resolveEventWorktreePath = (options: WorktreeEventOptions): string | undef
 
   const workspaceId = workspaceIdFromPayload(payload) ?? options.workspaceId;
   if (workspaceId === undefined || workspaceId.length === 0) return undefined;
-  const listedPath = pathFromWorkspace(workspaceId, options);
+  const listedPath = pathFromWorkspace(workspaceId, options.herdrClient);
   return listedPath === undefined || !isDirectory(listedPath)
     ? undefined
     : canonicalPath(listedPath);
@@ -240,7 +188,7 @@ const skippedEvent = (
  * status claim is handed to the setup pane through an atomic marker rename, so
  * the setup process can acquire the same claim while duplicate events no-op.
  *
- * @param options Event payload, Herdr runner, and clock dependencies.
+ * @param options Event payload, Herdr client, runner, and clock dependencies.
  * @returns The observable event result without terminating the caller.
  */
 export const runWorktreeEvent = (options: WorktreeEventOptions): WorktreeEventResult => {
@@ -262,20 +210,12 @@ export const runWorktreeEvent = (options: WorktreeEventOptions): WorktreeEventRe
 
     claim.write("running", undefined, undefined);
     claim.handoff();
-    runRequiredCommand(options.runner, "herdr plugin pane open", herdrCommand(options.herdrPath), [
-      "plugin",
-      "pane",
-      "open",
-      "--plugin",
-      PROJECT_PLUGIN_ID,
-      "--entrypoint",
-      "setup",
-      "--placement",
-      "overlay",
-      "--cwd",
-      worktreePath,
-      "--no-focus",
-    ]);
+    options.herdrClient.openPluginPane({
+      pluginId: PROJECT_PLUGIN_ID,
+      entrypoint: "setup",
+      placement: "overlay",
+      cwd: worktreePath,
+    });
 
     return {
       exitCode: 0,
@@ -348,44 +288,7 @@ const readPluginManifest = (
   return { root: canonicalPath(root), manifest: { id, version } };
 };
 
-const pluginEntriesFromResponse = (stdout: string): readonly ListedPlugin[] => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout) as unknown;
-  } catch (error) {
-    throw new Error("herdr plugin list returned invalid JSON", { cause: error });
-  }
-  if (!isRecord(parsed)) throw new Error("herdr plugin list returned an invalid envelope");
-  const result = readRecord(parsed, "result");
-  const plugins = result?.plugins;
-  if (!Array.isArray(plugins)) throw new Error("herdr plugin list returned no plugins");
-  return plugins.flatMap((value) => {
-    if (!isRecord(value)) return [];
-    const pluginId = readString(value, "plugin_id");
-    if (pluginId === undefined) return [];
-    return [
-      {
-        pluginId,
-        enabled: value.enabled === true,
-        pluginRoot: readString(value, "plugin_root"),
-        manifestPath: readString(value, "manifest_path"),
-        version: readString(value, "version"),
-      },
-    ];
-  });
-};
-
-type ProjectPluginEntry = {
-  readonly pluginId: string;
-  readonly enabled: boolean;
-};
-
-type LegacyPluginCheckOptions = {
-  readonly herdrPath: string | undefined;
-  readonly runner: CommandRunner;
-};
-
-const assertEnabledProjectPlugin = (plugins: readonly ProjectPluginEntry[]): void => {
+const assertEnabledProjectPlugin = (plugins: readonly HerdrPlugin[]): void => {
   const plugin = plugins.find((candidate) => candidate.pluginId === PROJECT_PLUGIN_ID);
   if (plugin?.enabled !== true) {
     throw new Error(
@@ -397,38 +300,21 @@ const assertEnabledProjectPlugin = (plugins: readonly ProjectPluginEntry[]): voi
 /**
  * Verifies that the managed-worktree plugin is linked and enabled in Herdr.
  *
- * The Herdr-client form is used by worktree creation. The legacy runner form
- * remains temporarily for project add until ticket 08 migrates that caller.
- *
- * @param source Herdr client, or legacy Herdr command dependencies.
+ * @param herdrClient Client used to list the installed plugins.
  * @returns Nothing when the plugin is ready for worktree creation.
- * @throws When Herdr cannot list plugins, returns malformed JSON, or does not
- * list this plugin as enabled.
+ * @throws When Herdr cannot list plugins or does not list this plugin as enabled.
  */
-export const assertProjectPluginEnabled = (
-  source: HerdrClient | LegacyPluginCheckOptions,
-): void => {
-  if ("listPlugins" in source) {
-    assertEnabledProjectPlugin(source.listPlugins());
-    return;
-  }
-
-  const list = runRequiredCommand(
-    source.runner,
-    "herdr plugin list",
-    herdrCommand(source.herdrPath),
-    ["plugin", "list", "--json"],
-  );
-  assertEnabledProjectPlugin(pluginEntriesFromResponse(list.stdout));
+export const assertProjectPluginEnabled = (herdrClient: HerdrClient): void => {
+  assertEnabledProjectPlugin(herdrClient.listPlugins());
 };
 
-const pluginRootPath = (plugin: ListedPlugin): string | undefined => {
+const pluginRootPath = (plugin: HerdrPlugin): string | undefined => {
   const path = plugin.pluginRoot ?? plugin.manifestPath;
   if (path === undefined) return undefined;
   return basename(path) === PROJECT_PLUGIN_MANIFEST ? dirname(path) : path;
 };
 
-const pluginRootMatches = (plugin: ListedPlugin, root: string): boolean => {
+const pluginRootMatches = (plugin: HerdrPlugin, root: string): boolean => {
   const path = pluginRootPath(plugin);
   return path !== undefined && samePath(path, root);
 };

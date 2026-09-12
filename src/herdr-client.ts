@@ -316,11 +316,10 @@ const parsePanes = (stdout: string): readonly HerdrPane[] => {
 /**
  * Constructs the runner-backed Herdr adapter.
  *
- * The adapter is the intended centralized production home for Herdr's
- * executable path, command arguments, JSON envelope, and response-field names.
- * Ticket 06 adds it beside existing callers; later migrations will move those
- * callers behind this interface. Callers using the adapter receive normalized
- * values and never need to parse Herdr output themselves.
+ * The adapter is the centralized production home for Herdr's executable path,
+ * command arguments, JSON envelope, and response-field names. Callers using
+ * the adapter receive normalized values and never need to parse Herdr output
+ * themselves.
  *
  * @param runner Injected command runner used to invoke Herdr.
  * @param herdrPath Herdr executable or absolute path, defaulting to `herdr`.

@@ -2,11 +2,11 @@ import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   errorMessage,
-  runRequiredCommand,
   runRequiredGitCommand,
   runGitCommand,
   type CommandRunner,
 } from "./command-runner.ts";
+import type { HerdrClient, HerdrWorktree } from "./herdr-client.ts";
 import {
   listWorktreeStatuses,
   removeWorktreeStatusEntry,
@@ -35,15 +35,9 @@ import {
 export const WORKTREE_BUILD_DIRECTORIES = ["target", "node_modules"] as const;
 
 /**
- * One Herdr worktree as reported by `herdr worktree list`.
+ * One normalized Herdr worktree used by project garbage collection.
  */
-export type ProjectHerdrWorktree = {
-  readonly path: string;
-  readonly branch: string | undefined;
-  readonly linked: boolean;
-  readonly openWorkspaceId: string | undefined;
-  readonly prunable: boolean;
-};
+export type ProjectHerdrWorktree = HerdrWorktree;
 
 /**
  * A worktree that garbage collection may remove after its preflight checks.
@@ -110,7 +104,7 @@ export type ProjectGcPlan = {
 export type ProjectGcOptions = {
   readonly projectPath: string;
   readonly dryRun: boolean;
-  readonly herdrPath: string | undefined;
+  readonly herdrClient: HerdrClient;
   readonly runner: CommandRunner;
   readonly buildDirectories: readonly string[] | undefined;
 };
@@ -142,7 +136,7 @@ export type ProjectGcResult = ProjectGcPlan & {
  */
 export type AdoptWorktreesOptions = {
   readonly projectPath: string;
-  readonly herdrPath: string | undefined;
+  readonly herdrClient: HerdrClient;
   readonly runner: CommandRunner;
   readonly syncReferences: SyncReferences;
   readonly now: (() => string) | undefined;
@@ -169,23 +163,6 @@ export type AdoptWorktreesResult = {
   readonly exitCode: number;
 };
 
-type JsonRecord = Record<string, unknown>;
-
-const herdrCommand = (herdrPath: string | undefined): string => herdrPath ?? "herdr";
-
-const isRecord = (value: unknown): value is JsonRecord =>
-  typeof value === "object" && value !== null;
-
-const readString = (record: JsonRecord, key: string): string | undefined => {
-  const value = record[key];
-  return typeof value === "string" ? value : undefined;
-};
-
-const readRecord = (record: JsonRecord, key: string): JsonRecord | undefined => {
-  const value = record[key];
-  return isRecord(value) ? value : undefined;
-};
-
 const isDirectory = (path: string): boolean => {
   try {
     return lstatSync(path).isDirectory();
@@ -201,11 +178,6 @@ const isSameOrDescendant = (parent: string, candidate: string): boolean => {
   );
 };
 
-const normalizeBranch = (value: string | undefined): string | undefined => {
-  if (value === undefined) return undefined;
-  return value.startsWith("refs/heads/") ? value.slice("refs/heads/".length) : value;
-};
-
 const currentBranch = (mainCheckout: string, runner: CommandRunner): string => {
   const result = runRequiredGitCommand(
     runner,
@@ -218,47 +190,13 @@ const currentBranch = (mainCheckout: string, runner: CommandRunner): string => {
   return branch;
 };
 
-const parseHerdrWorktrees = (stdout: string): readonly ProjectHerdrWorktree[] => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout) as unknown;
-  } catch (error) {
-    throw new Error("herdr worktree list returned invalid JSON", { cause: error });
-  }
-  if (!isRecord(parsed)) throw new Error("herdr worktree list returned an invalid envelope");
-  const result = readRecord(parsed, "result");
-  const worktrees = result?.worktrees;
-  if (!Array.isArray(worktrees)) throw new Error("herdr worktree list returned no worktrees");
-
-  return worktrees.flatMap((value) => {
-    if (!isRecord(value)) return [];
-    const path = readString(value, "path");
-    if (path === undefined || path.length === 0) return [];
-    return [
-      {
-        path: canonicalPath(path),
-        branch: normalizeBranch(readString(value, "branch")),
-        linked: value.is_linked_worktree !== false,
-        openWorkspaceId: readString(value, "open_workspace_id"),
-        prunable: value.is_prunable === true,
-      },
-    ];
-  });
-};
-
 const listHerdrWorktrees = (
-  options: Pick<ProjectGcOptions, "herdrPath" | "runner">,
+  herdrClient: HerdrClient,
   mainCheckout: string,
-): readonly ProjectHerdrWorktree[] => {
-  const result = runRequiredCommand(
-    options.runner,
-    "herdr worktree list",
-    herdrCommand(options.herdrPath),
-    ["worktree", "list"],
-    { cwd: mainCheckout, env: undefined },
-  );
-  return parseHerdrWorktrees(result.stdout);
-};
+): readonly ProjectHerdrWorktree[] =>
+  herdrClient
+    .listWorktrees({ cwd: mainCheckout, workspaceId: undefined })
+    .filter((worktree) => worktree.linked === true);
 
 const statusForPath = (
   entries: readonly WorktreeStatusEntry[],
@@ -327,14 +265,14 @@ const worktreeByPath = (
 /**
  * Builds a non-mutating cleanup plan for one project's worktrees.
  *
- * @param options Project path and injected Git/Herdr command runner.
+ * @param options Project path and injected Git runner and Herdr client.
  * @returns Every removable, busy, detached, stale, and unregistered item.
  */
 const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan => {
   const mainCheckout = resolveMainCheckout(options.projectPath, options.runner);
   const targetBranch = currentBranch(mainCheckout, options.runner);
   const gitWorktrees = listLinkedWorktrees(mainCheckout, options.runner);
-  const herdrWorktrees = listHerdrWorktrees(options, mainCheckout);
+  const herdrWorktrees = listHerdrWorktrees(options.herdrClient, mainCheckout);
   const herdrByPath = worktreeByPath(herdrWorktrees);
   const statusEntries = listWorktreeStatuses(mainCheckout);
   const existingGitWorktrees = gitWorktrees.filter((worktree) => isDirectory(worktree.path));
@@ -455,7 +393,7 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
         worktree.linked && worktree.openWorkspaceId !== undefined && !isDirectory(worktree.path),
     )
     .map((worktree) => ({
-      path: worktree.path,
+      path: canonicalPath(worktree.path),
       workspaceId: worktree.openWorkspaceId as string,
     }))
     .filter(
@@ -507,13 +445,7 @@ const applyProjectGc = (
 
   for (const detached of plan.detachedWorkspaces) {
     try {
-      runRequiredCommand(
-        options.runner,
-        "herdr workspace close",
-        herdrCommand(options.herdrPath),
-        ["workspace", "close", detached.workspaceId],
-        { cwd: plan.mainCheckout, env: undefined },
-      );
+      options.herdrClient.closeWorkspace(detached.workspaceId, plan.mainCheckout);
       closedWorkspaces.push(detached.workspaceId);
     } catch (error) {
       failures.push(cleanupFailure("close workspace", detached.path, error));
@@ -680,23 +612,11 @@ const openWorktree = (
   worktree: WorkspaceWorktree,
 ): { readonly opened: boolean; readonly error: string | undefined } => {
   try {
-    runRequiredCommand(
-      options.runner,
-      "herdr worktree open",
-      herdrCommand(options.herdrPath),
-      [
-        "worktree",
-        "open",
-        "--cwd",
-        mainCheckout,
-        "--path",
-        worktree.path,
-        "--label",
-        worktreeLabelFor(worktree),
-        "--no-focus",
-      ],
-      { cwd: mainCheckout, env: undefined },
-    );
+    options.herdrClient.openWorktree({
+      cwd: mainCheckout,
+      path: worktree.path,
+      label: worktreeLabelFor(worktree),
+    });
     return { opened: true, error: undefined };
   } catch (error) {
     return { opened: false, error: errorMessage(error) };
@@ -710,13 +630,13 @@ const openWorktree = (
  * missing workspace is opened without focus after the setup attempt so failed
  * adoption remains visible and retryable through the plugin overlay.
  *
- * @param options Project path, setup seam, and injected Herdr runner.
+ * @param options Project path, setup seam, and injected Herdr client.
  * @returns Ordered per-worktree adoption results and an aggregate exit code.
  */
 export const runAdoptWorktrees = (options: AdoptWorktreesOptions): AdoptWorktreesResult => {
   const mainCheckout = resolveMainCheckout(options.projectPath, options.runner);
   const gitWorktrees = listLinkedWorktrees(mainCheckout, options.runner);
-  const herdrWorktrees = listHerdrWorktrees(options, mainCheckout);
+  const herdrWorktrees = listHerdrWorktrees(options.herdrClient, mainCheckout);
   const herdrByPath = worktreeByPath(herdrWorktrees);
   const items: AdoptWorktreeItem[] = [];
 
@@ -740,6 +660,7 @@ export const runAdoptWorktrees = (options: AdoptWorktreesOptions): AdoptWorktree
         allowCompleted: true,
         mainCheckout,
         now: options.now,
+        herdrClient: options.herdrClient,
         runner: options.runner,
         syncReferences: options.syncReferences,
         worktreePath: worktree.path,

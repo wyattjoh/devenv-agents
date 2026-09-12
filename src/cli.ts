@@ -145,6 +145,7 @@ const runWorktreeSetupCommand = (
     allowCompleted: true,
     mainCheckout: undefined,
     now: dependencies.now,
+    herdrClient: dependencies.herdrClient,
     runner: dependencies.runner,
     syncReferences: dependencies.syncReferences,
     worktreePath: dependencies.cwd ?? process.cwd(),
@@ -172,7 +173,7 @@ const runWorktreeEventCommand = (dependencies: CliDependencies): number => {
   return runWorktreeEvent({
     eventJson: environment.HERDR_PLUGIN_EVENT_JSON,
     workspaceId: environment.HERDR_WORKSPACE_ID,
-    herdrPath: environment.HERDR_BIN_PATH,
+    herdrClient: dependencies.herdrClient,
     now: dependencies.now,
     runner: dependencies.runner,
   }).exitCode;
@@ -342,7 +343,7 @@ const runProjectGcCommand = (
       const result = runProjectGc({
         buildDirectories: undefined,
         dryRun,
-        herdrPath: environment.HERDR_BIN_PATH,
+        herdrClient: dependencies.herdrClient,
         projectPath: dependencies.cwd ?? process.cwd(),
         runner: dependencies.runner,
       });
@@ -363,7 +364,7 @@ const runProjectGcCommand = (
         const result = runProjectGc({
           buildDirectories: undefined,
           dryRun,
-          herdrPath: environment.HERDR_BIN_PATH,
+          herdrClient: dependencies.herdrClient,
           projectPath: project.path,
           runner: dependencies.runner,
         });
@@ -401,7 +402,7 @@ const runAdoptWorktreesCommand = (
   try {
     if (!all) {
       const result = runAdoptWorktrees({
-        herdrPath: environment.HERDR_BIN_PATH,
+        herdrClient: dependencies.herdrClient,
         now: dependencies.now,
         projectPath: dependencies.cwd ?? process.cwd(),
         runner: dependencies.runner,
@@ -422,7 +423,7 @@ const runAdoptWorktreesCommand = (
     for (const project of projects) {
       try {
         const result = runAdoptWorktrees({
-          herdrPath: environment.HERDR_BIN_PATH,
+          herdrClient: dependencies.herdrClient,
           now: dependencies.now,
           projectPath: project.path,
           runner: dependencies.runner,
@@ -506,7 +507,7 @@ const runProjectAddCommand = (
       templateRoot: environment.PROJECT_TEMPLATE_ROOT ?? roots.templateRoot,
       host: host ?? environment.PROJECT_HOST ?? "strix",
       user: environment.USER ?? environment.USERNAME ?? "user",
-      herdrPath: environment.HERDR_BIN_PATH,
+      herdrClient: dependencies.herdrClient,
       runner: dependencies.runner,
       syncReferences: dependencies.syncReferences,
     });

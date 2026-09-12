@@ -1,12 +1,7 @@
 import { existsSync, lstatSync, readlinkSync, symlinkSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import {
-  errorMessage,
-  runCommand,
-  runRequiredCommand,
-  type CommandRunner,
-  type CommandResult,
-} from "./command-runner.ts";
+import { errorMessage, runRequiredCommand, type CommandRunner } from "./command-runner.ts";
+import type { HerdrClient, HerdrPane } from "./herdr-client.ts";
 import { readProjectDeclaration, type ProjectDeclaration } from "./project-declaration.ts";
 import { resolveMainCheckout, samePath } from "./workspace.ts";
 import {
@@ -47,6 +42,7 @@ export type SyncReferences = {
 export type WorktreeSetupOptions = {
   readonly worktreePath: string;
   readonly mainCheckout: string | undefined;
+  readonly herdrClient: HerdrClient;
   readonly runner: CommandRunner;
   readonly syncReferences: SyncReferences;
   readonly now: (() => string) | undefined;
@@ -93,47 +89,21 @@ const linkLocalLayer = (mainCheckout: string, worktreePath: string): void => {
   symlinkSync(source, destination);
 };
 
-const paneList = (runner: CommandRunner): readonly Record<string, unknown>[] => {
-  let result: CommandResult;
+const wakePaneForWorktree = (herdrClient: HerdrClient, worktreePath: string): void => {
+  let panes: readonly HerdrPane[];
   try {
-    result = runCommand(runner, "herdr", ["pane", "list"]);
+    panes = herdrClient.listPanes();
   } catch {
-    return [];
+    return;
   }
-  if (result.exitCode !== 0) return [];
 
-  try {
-    const envelope = JSON.parse(result.stdout) as unknown;
-    if (
-      typeof envelope !== "object" ||
-      envelope === null ||
-      !("result" in envelope) ||
-      typeof envelope.result !== "object" ||
-      envelope.result === null ||
-      !("panes" in envelope.result) ||
-      !Array.isArray(envelope.result.panes)
-    ) {
-      return [];
-    }
-    return envelope.result.panes.filter(
-      (pane): pane is Record<string, unknown> => typeof pane === "object" && pane !== null,
-    );
-  } catch {
-    return [];
-  }
-};
-
-const wakeRootPane = (runner: CommandRunner, worktreePath: string): void => {
-  const pane = paneList(runner).find(
-    (candidate) =>
-      typeof candidate.cwd === "string" &&
-      typeof candidate.pane_id === "string" &&
-      samePath(candidate.cwd, worktreePath),
+  const pane = panes.find(
+    (candidate) => candidate.cwd !== undefined && samePath(candidate.cwd, worktreePath),
   );
-  if (pane === undefined || typeof pane.pane_id !== "string") return;
+  if (pane === undefined) return;
 
   try {
-    runCommand(runner, "herdr", ["pane", "send-keys", pane.pane_id, "Enter"]);
+    herdrClient.sendKeys(pane.paneId, "Enter");
   } catch {
     // A setup that succeeded outside Herdr stays successful if the optional wake fails.
   }
@@ -208,7 +178,7 @@ export const runWorktreeSetup = (options: WorktreeSetupOptions): WorktreeSetupRe
     });
     claim.write("done", undefined, (options.now ?? (() => new Date().toISOString()))());
     claim.release();
-    wakeRootPane(options.runner, options.worktreePath);
+    wakePaneForWorktree(options.herdrClient, options.worktreePath);
     return resultFromStatus(paths.statusPath, paths.claimPath, "done", undefined);
   } catch (error) {
     const message = errorMessage(error);

@@ -15,6 +15,7 @@ import {
   type CommandResult,
   type RecordingRunner,
 } from "./command-runner.ts";
+import type { HerdrClient, HerdrWorktree } from "./herdr-client.ts";
 import { runCli, type CliDependencies } from "./cli.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import {
@@ -153,66 +154,59 @@ const makeProject = (): {
   return { root, main, worktreeRoot, merged, unmerged, dirty, open, missing, orphan, stray };
 };
 
-const herdrList = (project: ReturnType<typeof makeProject>): string =>
-  JSON.stringify({
-    result: {
-      source: {
-        repo_root: project.main,
-        source_checkout_path: project.main,
-        source_workspace_id: "root",
-      },
-      worktrees: [
-        {
-          branch: "main",
-          is_linked_worktree: false,
-          is_prunable: false,
-          open_workspace_id: "root",
-          path: project.main,
-        },
-        {
-          branch: "feature/merged",
-          is_linked_worktree: true,
-          is_prunable: false,
-          open_workspace_id: undefined,
-          path: project.merged,
-        },
-        {
-          branch: "feature/unmerged",
-          is_linked_worktree: true,
-          is_prunable: false,
-          open_workspace_id: undefined,
-          path: project.unmerged,
-        },
-        {
-          branch: "feature/dirty",
-          is_linked_worktree: true,
-          is_prunable: false,
-          open_workspace_id: undefined,
-          path: project.dirty,
-        },
-        {
-          branch: "feature/open",
-          is_linked_worktree: true,
-          is_prunable: true,
-          open_workspace_id: "open-workspace",
-          path: project.open,
-        },
-        {
-          branch: "feature/missing",
-          is_linked_worktree: true,
-          is_prunable: true,
-          open_workspace_id: "detached-workspace",
-          path: project.missing,
-        },
-      ],
-    },
-  });
+const herdrWorktrees = (project: ReturnType<typeof makeProject>): readonly HerdrWorktree[] => [
+  {
+    branch: "main",
+    linked: false,
+    openWorkspaceId: "root",
+    path: project.main,
+    prunable: false,
+  },
+  {
+    branch: "feature/merged",
+    linked: true,
+    openWorkspaceId: undefined,
+    path: project.merged,
+    prunable: false,
+  },
+  {
+    branch: "feature/unmerged",
+    linked: true,
+    openWorkspaceId: undefined,
+    path: project.unmerged,
+    prunable: false,
+  },
+  {
+    branch: "feature/dirty",
+    linked: true,
+    openWorkspaceId: undefined,
+    path: project.dirty,
+    prunable: false,
+  },
+  {
+    branch: "feature/open",
+    linked: true,
+    openWorkspaceId: "open-workspace",
+    path: project.open,
+    prunable: true,
+  },
+  {
+    branch: "feature/missing",
+    linked: true,
+    openWorkspaceId: "detached-workspace",
+    path: project.missing,
+    prunable: true,
+  },
+];
 
-const gcRunner = (project: ReturnType<typeof makeProject>): RecordingRunner =>
-  createRecordingRunner({
-    git: runFixtureGit,
-    "herdr worktree list": result(0, herdrList(project)),
-  });
+const gcRunner = (_project: ReturnType<typeof makeProject>): RecordingRunner =>
+  createRecordingRunner({ git: runFixtureGit });
+
+const gcClient = (
+  project: ReturnType<typeof makeProject>,
+  overrides: Partial<HerdrClient> = {},
+): HerdrClient =>
+  createFakeHerdrClient({ listWorktrees: () => herdrWorktrees(project), ...overrides });
 
 const captureOutput = (): {
   readonly stdout: () => string;
@@ -250,7 +244,7 @@ describe("project gc", () => {
     const report = runProjectGc({
       buildDirectories: undefined,
       dryRun: true,
-      herdrPath: undefined,
+      herdrClient: gcClient(project),
       projectPath: project.main,
       runner,
     });
@@ -283,6 +277,38 @@ describe("project gc", () => {
     expect(formatProjectGc(report)).toContain("Dry run: no changes made.");
   });
 
+  it("ignores a false-linked Herdr workspace when classifying a Git worktree", () => {
+    const project = makeProject();
+    const runner = gcRunner(project);
+    const mergedPath = realpathSync(project.merged);
+    const report = runProjectGc({
+      buildDirectories: undefined,
+      dryRun: true,
+      herdrClient: createFakeHerdrClient({
+        listWorktrees: () => [
+          {
+            branch: "main",
+            linked: false,
+            openWorkspaceId: "root",
+            path: project.merged,
+            prunable: false,
+          },
+        ],
+      }),
+      projectPath: project.main,
+      runner,
+    });
+
+    expect(report.removable).toContainEqual(
+      expect.objectContaining({
+        branch: "feature/merged",
+        path: mergedPath,
+        workspaceId: undefined,
+      }),
+    );
+    expect(report.busy).not.toContainEqual(expect.objectContaining({ path: mergedPath }));
+  });
+
   it("shares main-checkout identity between gc and update for a symlinked root", () => {
     const project = makeProject();
     const symlinkedMain = `${project.main}-alias`;
@@ -290,7 +316,6 @@ describe("project gc", () => {
     created.push(symlinkedMain);
     const runner = createRecordingRunner({
       git: runFixtureGit,
-      "herdr worktree list": result(0, herdrList(project)),
       "devenv update agents": result(0),
       "devenv shell -- true": result(0),
     });
@@ -298,7 +323,7 @@ describe("project gc", () => {
     const gc = runProjectGc({
       buildDirectories: undefined,
       dryRun: true,
-      herdrPath: undefined,
+      herdrClient: gcClient(project),
       projectPath: symlinkedMain,
       runner,
     });
@@ -327,7 +352,7 @@ describe("project gc", () => {
     const report = runProjectGc({
       buildDirectories: undefined,
       dryRun: false,
-      herdrPath: undefined,
+      herdrClient: gcClient(project),
       projectPath: project.main,
       runner,
     });
@@ -359,13 +384,12 @@ describe("project gc", () => {
         }
         return runFixtureGit(invocation);
       },
-      "herdr worktree list": result(0, herdrList(project)),
     });
 
     const report = runProjectGc({
       buildDirectories: undefined,
       dryRun: false,
-      herdrPath: undefined,
+      herdrClient: gcClient(project),
       projectPath: project.main,
       runner,
     });
@@ -421,24 +445,40 @@ describe("adopt-worktrees", () => {
     );
     created.push(root);
 
-    const herdr = JSON.stringify({
-      result: {
-        worktrees: [
-          { is_linked_worktree: false, open_workspace_id: "root", path: main },
-          { is_linked_worktree: true, open_workspace_id: undefined, path: first },
-          { is_linked_worktree: true, open_workspace_id: "w2", path: second },
-        ],
-      },
+    const openedPaths: string[] = [];
+    const herdrClient = createFakeHerdrClient({
+      listWorktrees: () => [
+        {
+          branch: undefined,
+          linked: false,
+          openWorkspaceId: "root",
+          path: main,
+          prunable: false,
+        },
+        {
+          branch: "feature/first",
+          linked: true,
+          openWorkspaceId: undefined,
+          path: first,
+          prunable: false,
+        },
+        {
+          branch: "feature/second",
+          linked: true,
+          openWorkspaceId: "w2",
+          path: second,
+          prunable: false,
+        },
+      ],
+      openWorktree: ({ path }) => openedPaths.push(path),
     });
     const runner = createRecordingRunner({
       git: runFixtureGit,
-      "herdr worktree list": result(0, herdr),
-      "herdr worktree open": result(0),
       devenv: result(0),
     });
     const syncPaths: string[] = [];
     const adopted = runAdoptWorktrees({
-      herdrPath: undefined,
+      herdrClient,
       now: () => "2026-09-08T01:00:00.000Z",
       projectPath: main,
       runner,
@@ -450,28 +490,26 @@ describe("adopt-worktrees", () => {
       [realpathSync(second), false, "w2"],
     ]);
     expect(syncPaths).toEqual([realpathSync(first), realpathSync(second)]);
-    expect(
-      runner.calls.filter((call) => call.args[0] === "worktree" && call.args[1] === "open"),
-    ).toHaveLength(1);
+    expect(openedPaths).toEqual([realpathSync(first)]);
     expect(formatAdoptWorktrees(adopted)).toContain("Summary: 2 worktrees, exit 0");
   });
 
   it("continues adoption when opening a workspace throws", () => {
     const project = makeProject();
+    const openedPaths: string[] = [];
+    const herdrClient = gcClient(project, {
+      openWorktree: ({ path }) => {
+        openedPaths.push(path);
+        throw new Error("workspace service unavailable");
+      },
+    });
     const runner = createRecordingRunner({
       git: runFixtureGit,
-      herdr: (invocation) => {
-        if (invocation.args[0] === "worktree" && invocation.args[1] === "open") {
-          throw new Error("workspace service unavailable");
-        }
-        return result(0);
-      },
-      "herdr worktree list": result(0, herdrList(project)),
       devenv: result(0),
     });
 
     const adopted = runAdoptWorktrees({
-      herdrPath: undefined,
+      herdrClient,
       now: () => "2026-09-08T01:00:00.000Z",
       projectPath: project.main,
       runner,
@@ -485,12 +523,7 @@ describe("adopt-worktrees", () => {
     expect(existing.filter((item) => item.error === "workspace service unavailable")).toHaveLength(
       3,
     );
-    expect(
-      runner.calls.filter(
-        (call) =>
-          call.command === "herdr" && call.args[0] === "worktree" && call.args[1] === "open",
-      ),
-    ).toHaveLength(3);
+    expect(openedPaths).toHaveLength(3);
   });
 
   it("wires gc dry-run through the CLI without changing existing dependencies", () => {
@@ -502,7 +535,7 @@ describe("adopt-worktrees", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
-      herdrClient: createFakeHerdrClient(),
+      herdrClient: gcClient(project),
       syncReferences: () => undefined,
       environment: { PROJECT_PLATFORM: "linux" },
       pluginPath: undefined,
@@ -535,20 +568,26 @@ describe("adopt-worktrees", () => {
     created.push(registryRoot);
 
     let herdrListIndex = 0;
-    const runner = createRecordingRunner({
-      git: runFixtureGit,
-      "herdr worktree list": () => {
-        const project = projects[herdrListIndex % projects.length];
+    const listedCwds: string[] = [];
+    const closedWorkspaces: string[] = [];
+    const openedCwds: string[] = [];
+    const herdrClient = createFakeHerdrClient({
+      listWorktrees: (options) => {
+        listedCwds.push(options?.cwd ?? "");
+        const project = projects[herdrListIndex % projects.length]!;
         herdrListIndex += 1;
-        return result(0, herdrList(project));
+        return herdrWorktrees(project);
       },
+      closeWorkspace: (workspaceId, cwd) => closedWorkspaces.push(`${cwd ?? ""}:${workspaceId}`),
+      openWorktree: ({ cwd }) => openedCwds.push(cwd),
     });
+    const runner = createRecordingRunner({ git: runFixtureGit });
     const dependencies: CliDependencies = {
       cwd: projects[0]?.main,
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
-      herdrClient: createFakeHerdrClient(),
+      herdrClient,
       syncReferences: () => undefined,
       environment: { PROJECT_PLATFORM: "darwin", PROJECT_PROJECTS_FILE: projectsFile },
       pluginPath: undefined,
@@ -558,35 +597,23 @@ describe("adopt-worktrees", () => {
     expect(runCli(["gc", "--all"], gcOutput.io, dependencies)).toBe(0);
     expect(gcOutput.stdout()).toContain(`Project: ${realpathSync(projects[0]!.main)}`);
     expect(gcOutput.stdout()).toContain(`Project: ${realpathSync(projects[1]!.main)}`);
-    expect(
-      runner.calls
-        .filter((call) => call.command === "herdr" && call.args[0] === "workspace")
-        .map((call) => call.cwd),
-    ).toEqual([realpathSync(projects[0]!.main), realpathSync(projects[1]!.main)]);
+    expect(closedWorkspaces).toEqual([
+      `${realpathSync(projects[0]!.main)}:detached-workspace`,
+      `${realpathSync(projects[1]!.main)}:detached-workspace`,
+    ]);
 
     const adoptOutput = captureOutput();
     expect(runCli(["adopt-worktrees", "--all"], adoptOutput.io, dependencies)).toBe(1);
     expect(adoptOutput.stdout()).toContain("[forge/example/project-0] Summary:");
     expect(adoptOutput.stdout()).toContain("[forge/example/project-1] Summary:");
     expect(herdrListIndex).toBe(4);
-    expect(
-      runner.calls
-        .filter((call) => call.command === "herdr" && call.args.join(" ") === "worktree list")
-        .map((call) => call.cwd),
-    ).toEqual([
+    expect(listedCwds).toEqual([
       realpathSync(projects[0]!.main),
       realpathSync(projects[1]!.main),
       realpathSync(projects[0]!.main),
       realpathSync(projects[1]!.main),
     ]);
-    expect(
-      runner.calls
-        .filter(
-          (call) =>
-            call.command === "herdr" && call.args[0] === "worktree" && call.args[1] === "open",
-        )
-        .map((call) => call.cwd),
-    ).toEqual([
+    expect(openedCwds).toEqual([
       realpathSync(projects[0]!.main),
       realpathSync(projects[0]!.main),
       realpathSync(projects[1]!.main),

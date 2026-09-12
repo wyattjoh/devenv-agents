@@ -15,6 +15,7 @@ import {
   type CommandResult,
   type RecordingRunner,
 } from "./command-runner.ts";
+import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import {
   claimWorktreeStatus,
   getWorktreeStatusPaths,
@@ -54,6 +55,7 @@ const makeOptions = (
     allowCompleted: undefined,
     mainCheckout,
     worktreePath,
+    herdrClient: createFakeHerdrClient(),
     runner,
     syncReferences,
     now,
@@ -84,15 +86,7 @@ describe("worktree setup", () => {
   });
 
   it("runs allow, direnv approval, local-layer linking, noninteractive warm, and sync in order", () => {
-    const paneList = JSON.stringify({
-      result: {
-        panes: [{ cwd: "/tmp/not-this-worktree", pane_id: "w1:p1" }],
-      },
-    });
-    const runner = createRecordingRunner({
-      devenv: result(0),
-      "herdr pane list": result(0, paneList),
-    });
+    const runner = createRecordingRunner({ devenv: result(0) });
     const syncRequests: string[] = [];
     const options = makeOptions(
       runner,
@@ -113,7 +107,6 @@ describe("worktree setup", () => {
         cwd: options.worktreePath,
         env: undefined,
       },
-      { command: "herdr", args: ["pane", "list"], cwd: undefined, env: undefined },
     ]);
     expect(lstatSync(join(options.worktreePath, "devenv.local.nix")).isSymbolicLink()).toBe(true);
     expect(readWorktreeStatus(setup.statusPath)?.state).toBe("done");
@@ -143,7 +136,6 @@ describe("worktree setup", () => {
         cwd: options.worktreePath,
         env: undefined,
       },
-      { command: "herdr", args: ["pane", "list"], cwd: undefined, env: undefined },
     ]);
   });
 
@@ -305,63 +297,36 @@ describe("worktree setup", () => {
     expect(existsSync(quit.claimPath)).toBe(false);
   });
 
-  it("keeps setup successful when no Herdr socket is available", () => {
-    const runner = createRecordingRunner({
-      devenv: result(0),
-      herdr: result(1, "", "no socket"),
-    });
+  it("keeps setup successful when pane discovery throws", () => {
+    const runner = createRecordingRunner({ devenv: result(0) });
     const options = makeOptions(runner, () => undefined);
+    const herdrClient = createFakeHerdrClient({
+      listPanes: () => {
+        throw new Error("no socket");
+      },
+    });
 
-    const setup = runWorktreeSetup(options);
+    const setup = runWorktreeSetup({ ...options, herdrClient });
 
     expect(setup.exitCode).toBe(0);
-    expect(runner.calls.at(-1)).toEqual({
-      command: "herdr",
-      args: ["pane", "list"],
-      cwd: undefined,
-      env: undefined,
-    });
-    expect(runner.calls.some((call) => call.args[0] === "send-keys")).toBe(false);
+    expect(runner.calls.some((call) => call.command === "herdr")).toBe(false);
   });
 
   it("wakes the pane whose launch cwd is the worktree", () => {
-    const runner = createRecordingRunner({
-      devenv: result(0),
-      "herdr pane list": result(
-        0,
-        JSON.stringify({
-          result: {
-            panes: [
-              { cwd: "/tmp/not-this-worktree", pane_id: "w1:p1" },
-              { cwd: "/tmp/not-this-worktree", foreground_cwd: "/tmp/other", pane_id: "w1:p2" },
-            ],
-          },
-        }),
-      ),
-    });
+    const runner = createRecordingRunner({ devenv: result(0) });
     const options = makeOptions(runner, () => undefined);
-    const panePath = options.worktreePath;
-    const response = JSON.stringify({
-      result: {
-        panes: [
-          { cwd: "/tmp/setup-overlay", pane_id: "w2:p9" },
-          { cwd: panePath, pane_id: "w2:p8" },
-        ],
-      },
+    const sentKeys: [string, string][] = [];
+    const herdrClient = createFakeHerdrClient({
+      listPanes: () => [
+        { cwd: "/tmp/not-this-worktree", paneId: "w1:p1" },
+        { cwd: "/tmp/not-this-worktree", paneId: "w1:p2" },
+        { cwd: options.worktreePath, paneId: "w2:p8" },
+      ],
+      sendKeys: (paneId, keys) => sentKeys.push([paneId, keys]),
     });
-    runner.reset();
-    const setupRunner = createRecordingRunner({
-      devenv: result(0),
-      "herdr pane list": result(0, response),
-    });
-    const setup = runWorktreeSetup({ ...options, runner: setupRunner });
+    const setup = runWorktreeSetup({ ...options, herdrClient });
 
     expect(setup.exitCode).toBe(0);
-    expect(setupRunner.calls.at(-1)).toEqual({
-      command: "herdr",
-      args: ["pane", "send-keys", "w2:p8", "Enter"],
-      cwd: undefined,
-      env: undefined,
-    });
+    expect(sentKeys).toEqual([["w2:p8", "Enter"]]);
   });
 });

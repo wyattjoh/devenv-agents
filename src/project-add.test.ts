@@ -16,6 +16,7 @@ import {
   type RecordingRunner,
 } from "./command-runner.ts";
 import { runCli, type CliDependencies, type CliIO } from "./cli.ts";
+import type { HerdrPlugin } from "./herdr-client.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import {
   enumerateProjects,
@@ -38,22 +39,16 @@ const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
   stderr,
 });
 
-const fixtureText = (name: string): string =>
-  readFileSync(new URL(`../fixtures/herdr-0.9.0/${name}`, import.meta.url), "utf8");
+const enabledProjectPlugin = (): HerdrPlugin => ({
+  pluginId: PROJECT_PLUGIN_ID,
+  enabled: true,
+  pluginRoot,
+  manifestPath: join(pluginRoot, "herdr-plugin.toml"),
+  version: "0.1.0",
+});
 
-const pluginList = (): string => {
-  const listed = JSON.parse(fixtureText("plugin-list.json")) as {
-    result: { plugins: Record<string, unknown>[] };
-  };
-  listed.result.plugins[0] = {
-    ...listed.result.plugins[0],
-    enabled: true,
-    plugin_id: PROJECT_PLUGIN_ID,
-    plugin_root: pluginRoot,
-    manifest_path: join(pluginRoot, "herdr-plugin.toml"),
-  };
-  return JSON.stringify(listed);
-};
+const enabledHerdrClient = () =>
+  createFakeHerdrClient({ listPlugins: () => [enabledProjectPlugin()] });
 
 type Fixture = {
   readonly root: string;
@@ -114,7 +109,7 @@ const options = (
   templateRoot,
   host: "strix",
   user: "fixture",
-  herdrPath: undefined,
+  herdrClient: enabledHerdrClient(),
   runner,
   syncReferences: () => undefined,
   ...overrides,
@@ -127,16 +122,17 @@ describe("project add", () => {
 
   it("guards the plugin before parsing or cloning", () => {
     const fixture = makeFixture();
-    const runner = createRecordingRunner({
-      "herdr plugin list --json": result(0, JSON.stringify({ result: { plugins: [] } })),
-    });
+    const runner = createRecordingRunner();
 
-    expect(() => runProjectAdd(options(fixture, runner, { repository: "not-a-repo" }))).toThrow(
-      `Herdr plugin ${PROJECT_PLUGIN_ID} is not linked and enabled`,
-    );
-    expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
-      ["herdr", "plugin", "list", "--json"],
-    ]);
+    expect(() =>
+      runProjectAdd(
+        options(fixture, runner, {
+          repository: "not-a-repo",
+          herdrClient: createFakeHerdrClient({ listPlugins: () => [] }),
+        }),
+      ),
+    ).toThrow(`Herdr plugin ${PROJECT_PLUGIN_ID} is not linked and enabled`);
+    expect(runner.calls).toEqual([]);
   });
 
   it("clones, trusts, allows direnv, warms non-interactively, syncs, and enables Linux", () => {
@@ -146,7 +142,6 @@ describe("project add", () => {
     writeFileSync(join(checkout, ".agents", "project.toml"), 'session = "atlas"\n');
     writeFileSync(join(checkout, "devenv.nix"), "{ ... }: {}\n");
     const runner = createRecordingRunner({
-      "herdr plugin list --json": result(0, pluginList()),
       git: result(0),
       devenv: result(0),
       systemctl: result(0),
@@ -174,14 +169,13 @@ describe("project add", () => {
       `[Service]\nWorkingDirectory=${checkout}\n# ProjectRepository=github.com/example/widget\n`,
     );
     expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
-      ["herdr", "plugin", "list", "--json"],
       ["devenv", "allow"],
       ["direnv", "allow"],
       ["devenv", "shell", "--", "true"],
       ["systemctl", "--user", "daemon-reload"],
       ["systemctl", "--user", "enable", "--now", "herdr@atlas"],
     ]);
-    expect(runner.calls.slice(1, 4)).toEqual([
+    expect(runner.calls.slice(0, 3)).toEqual([
       { command: "devenv", args: ["allow"], cwd: checkout, env: undefined },
       { command: "direnv", args: ["allow"], cwd: checkout, env: undefined },
       {
@@ -204,7 +198,6 @@ describe("project add", () => {
     writeFileSync(join(checkout, ".agents", "project.toml"), 'session = "bad/session"\n');
     writeFileSync(join(checkout, "devenv.nix"), "{ ... }: {}\n");
     const runner = createRecordingRunner({
-      "herdr plugin list --json": result(0, pluginList()),
       devenv: result(0),
       systemctl: result(0),
     });
@@ -216,7 +209,6 @@ describe("project add", () => {
   it("binds a bundled template for a bare repository", () => {
     const fixture = makeFixture();
     const runner = createRecordingRunner({
-      "herdr plugin list --json": result(0, pluginList()),
       git: result(0),
       devenv: result(0),
       systemctl: result(0),
@@ -226,7 +218,6 @@ describe("project add", () => {
 
     expect(added.checkoutCreated).toBe(true);
     expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
-      ["herdr", "plugin", "list", "--json"],
       [
         "git",
         "clone",
@@ -245,16 +236,12 @@ describe("project add", () => {
     const fixture = makeFixture();
     const checkout = join(fixture.code, "github.com", "example", "widget");
     mkdirSync(checkout, { recursive: true });
-    const runner = createRecordingRunner({
-      "herdr plugin list --json": result(0, pluginList()),
-    });
+    const runner = createRecordingRunner();
 
     expect(() => runProjectAdd(options(fixture, runner))).toThrow(
       "Available templates: bare, bun-ts, deno, rust",
     );
-    expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
-      ["herdr", "plugin", "list", "--json"],
-    ]);
+    expect(runner.calls).toEqual([]);
   });
 
   it("wires add through the CLI dependencies and local roots", () => {
@@ -262,17 +249,14 @@ describe("project add", () => {
     const checkout = join(fixture.code, "github.com", "example", "widget");
     mkdirSync(checkout, { recursive: true });
     writeFileSync(join(checkout, "devenv.nix"), "{ ... }: {}\n");
-    const runner = createRecordingRunner({
-      "herdr plugin list --json": result(0, pluginList()),
-      devenv: result(0),
-    });
+    const runner = createRecordingRunner({ devenv: result(0) });
     const output = captureOutput();
     const dependencies: CliDependencies = {
       cwd: undefined,
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
-      herdrClient: createFakeHerdrClient(),
+      herdrClient: enabledHerdrClient(),
       syncReferences: () => undefined,
       environment: {
         PROJECT_CODE_ROOT: fixture.code,
@@ -302,7 +286,6 @@ describe("project add", () => {
     mkdirSync(checkout, { recursive: true });
     writeFileSync(join(checkout, "devenv.nix"), "{ ... }: {}\n");
     const runner = createRecordingRunner({
-      "herdr plugin list --json": result(0, pluginList()),
       devenv: result(0),
       systemctl: result(0),
     });
@@ -312,7 +295,7 @@ describe("project add", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
-      herdrClient: createFakeHerdrClient(),
+      herdrClient: enabledHerdrClient(),
       syncReferences: () => undefined,
       environment: {
         PROJECT_CODE_ROOT: fixture.code,
@@ -356,10 +339,7 @@ describe("project add", () => {
     const checkout = join(fixture.code, "github.com", "example", "widget");
     mkdirSync(checkout, { recursive: true });
     writeFileSync(join(checkout, "devenv.nix"), "{ ... }: {}\n");
-    const runner = createRecordingRunner({
-      "herdr plugin list --json": result(0, pluginList()),
-      devenv: result(0),
-    });
+    const runner = createRecordingRunner({ devenv: result(0) });
     const addOptions = options(fixture, runner, { platform: "darwin", local: true });
     const preserved: ProjectRegistration = {
       repo: "github.com/example/other",
