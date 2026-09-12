@@ -285,12 +285,3 @@ export const runInteractiveWorktreeSetup = (
   }
   return result;
 };
-
-/**
- * A no-op synchronization adapter for callers that explicitly do not need
- * reference materialization, such as isolated setup tests.
- *
- * @param request Setup context, including the normalized declaration.
- * @returns Nothing; this adapter intentionally performs no materialization.
- */
-export const noOpSyncReferences: SyncReferences = (_request) => undefined;

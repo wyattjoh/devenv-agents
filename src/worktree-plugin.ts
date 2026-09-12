@@ -232,18 +232,6 @@ const skippedEvent = (
 });
 
 /**
- * Resolves the canonical worktree path carried by an event or workspace id.
- *
- * Direct worktree paths take precedence. Workspace fallback results are limited
- * to linked worktrees whose open workspace id exactly matches the event.
- *
- * @param options Event payload, Herdr runner, and workspace context.
- * @returns A canonical worktree directory, or undefined for an unrelated event.
- */
-export const resolveWorktreeEventPath = (options: WorktreeEventOptions): string | undefined =>
-  resolveEventWorktreePath(options);
-
-/**
  * Handles one Herdr worktree lifecycle event.
  *
  * The hook is deliberately fail-open: unrelated events, malformed payloads,

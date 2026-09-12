@@ -1,6 +1,4 @@
-import { cleanGitEnv } from "../git-env.ts";
-
-export { cleanGitEnv, GIT_ENV_KEYS } from "../git-env.ts";
+import { cleanGitEnv } from "../command-runner.ts";
 
 /**
  * The captured result of a Git process.

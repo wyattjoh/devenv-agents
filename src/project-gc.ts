@@ -267,7 +267,7 @@ const parsePorcelainRecords = (stdout: string): readonly PorcelainRecord[] => {
  * @param mainCheckout Main checkout used to mark the primary entry as unlinked.
  * @returns Normalized Git worktree records.
  */
-export const parseProjectGitWorktrees = (
+const parseProjectGitWorktrees = (
   stdout: string,
   mainCheckout: string,
 ): readonly ProjectGitWorktree[] => {
@@ -418,7 +418,7 @@ const worktreeByPath = (
  * @param options Project path and injected Git/Herdr command runner.
  * @returns Every removable, busy, detached, stale, and unregistered item.
  */
-export const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan => {
+const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan => {
   const mainCheckout = resolveMainCheckout(options.projectPath, options.runner);
   const targetBranch = currentBranch(mainCheckout, options.runner);
   const gitWorktrees = listGitWorktrees(mainCheckout, options.runner);

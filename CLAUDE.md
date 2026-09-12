@@ -14,8 +14,8 @@ templates/                    # bun-ts, rust, bare and deno starter environments
 
 CLI and tests:
 src/cli.ts                 # source entrypoint and help/version behavior
-src/command-runner.ts      # injectable Herdr, devenv, and systemctl seam
-src/testing/git-env.ts     # sanitized Git process boundary
+src/command-runner.ts      # injectable command seam and Git environment sanitization
+src/testing/git-env.ts     # sanitized Git process helper for tests
 src/testing/git-fixture.ts # temporary repository and linked-worktree helper
 tests/module-shell.test.sh # shell assertions for the worktree environment
 fixtures/                  # captured Herdr protocol responses

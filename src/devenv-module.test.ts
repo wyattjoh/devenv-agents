@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { cleanGitEnv } from "./testing/git-env.ts";
+import { cleanGitEnv } from "./command-runner.ts";
 import { withGitFixture } from "./testing/git-fixture.ts";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));

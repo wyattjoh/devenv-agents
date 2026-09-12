@@ -164,7 +164,7 @@ const writeJsonAtomically = (path: string, value: WorktreeStatus): void => {
  * @param mainCheckout Canonical main checkout containing `.devenv/state`.
  * @returns The shared status root for the project.
  */
-export const getWorktreeStatusRoot = (mainCheckout: string): string =>
+const getWorktreeStatusRoot = (mainCheckout: string): string =>
   join(canonicalPath(mainCheckout), ".devenv", "state", "project", "worktrees");
 
 /**

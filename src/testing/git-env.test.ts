@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { cleanGitEnv, GIT_ENV_KEYS, spawnGit } from "./git-env.ts";
+import { cleanGitEnv } from "../command-runner.ts";
+import { spawnGit } from "./git-env.ts";
 
 describe("cleanGitEnv", () => {
   it("drops every repository-location variable and keeps identity variables", () => {
@@ -21,7 +22,6 @@ describe("cleanGitEnv", () => {
       HOME: "/home/test",
       GIT_AUTHOR_NAME: "Test",
     });
-    expect(GIT_ENV_KEYS).toHaveLength(7);
   });
 
   it("omits keys whose value is undefined", () => {

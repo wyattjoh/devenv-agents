@@ -330,6 +330,9 @@ const projectFileText = (projects: readonly ProjectRegistration[]): string =>
 /**
  * Writes or updates the Darwin per-user project registry without duplicates.
  *
+ * This function is the supported Darwin registry interface shared by project
+ * add, enumeration, and tests that seed registered projects.
+ *
  * @param options Project registration and target TOML path.
  * @returns Nothing; the registry is persisted atomically from the caller's perspective.
  */
@@ -359,7 +362,10 @@ const dropInDirectory = (systemdUserDirectory: string, session: string): string 
   join(systemdUserDirectory, `herdr@${session}.service.d`);
 
 /**
- * Writes the per-project Linux systemd user-unit drop-in.
+ * Writes the per-project Linux systemd user-unit registry entry.
+ *
+ * This function is the supported Linux registry interface shared by project
+ * add, enumeration, and tests that seed registered projects.
  *
  * @param options Project registration and systemd user configuration directory.
  * @returns The written drop-in path.
