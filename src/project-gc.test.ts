@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   createRecordingRunner,
@@ -14,7 +22,9 @@ import {
   runAdoptWorktrees,
   runProjectGc,
 } from "./project-gc.ts";
+import { formatProjectUpdate, runProjectUpdate } from "./project-update.ts";
 import { claimWorktreeStatus } from "./worktree-status.ts";
+import { createGitFixture } from "./testing/git-fixture.ts";
 import { spawnGit } from "./testing/git-env.ts";
 
 const created: string[] = [];
@@ -50,55 +60,25 @@ const makeProject = (): {
   readonly orphan: string;
   readonly stray: string;
 } => {
-  const root = mkdtempSync(join("/tmp", "devenv-agents-gc-"));
-  const main = join(root, "main");
+  const fixture = createGitFixture({
+    prefix: "devenv-agents-gc-",
+    branch: "feature/merged",
+    worktreeName: "merged",
+    env: undefined,
+  });
+  const { root, repository: main, worktree: merged } = fixture;
   const worktreeRoot = join(main, ".claude", "worktrees");
-  const merged = join(worktreeRoot, "merged");
   const unmerged = join(worktreeRoot, "unmerged");
   const dirty = join(worktreeRoot, "dirty");
   const open = join(worktreeRoot, "open");
   const missing = join(worktreeRoot, "missing");
   const orphan = join(worktreeRoot, "orphan");
   const stray = join(worktreeRoot, "stray");
-  mkdirSync(main, { recursive: true });
   mkdirSync(worktreeRoot, { recursive: true });
-  mkdirSync(join(main, ".agents"), { recursive: true });
-  writeFileSync(join(main, "README.md"), "fixture\n");
-  writeFileSync(join(main, ".gitignore"), "target/\nnode_modules/\n");
-  writeFileSync(join(main, ".agents", "project.toml"), 'session = "fixture"\n');
-  requireGit(main, ["init", "-q", "-b", "main"], "git init");
-  requireGit(main, ["add", "README.md", ".gitignore", ".agents/project.toml"], "git add");
-  requireGit(
-    main,
-    [
-      "-c",
-      "user.name=Fixture User",
-      "-c",
-      "user.email=fixture@example.com",
-      "commit",
-      "-q",
-      "-m",
-      "initial",
-    ],
-    "git commit",
-  );
 
-  for (const [branch, path] of [
-    ["feature/merged", merged],
-    ["feature/unmerged", unmerged],
-    ["feature/dirty", dirty],
-    ["feature/open", open],
-    ["feature/missing", missing],
-  ] as const) {
-    requireGit(
-      main,
-      ["worktree", "add", "-q", "-b", branch, path, "main"],
-      `git worktree add ${branch}`,
-    );
-  }
-
+  writeFileSync(join(merged, ".gitignore"), "target/\nnode_modules/\n");
   writeFileSync(join(merged, "merged.txt"), "merged\n");
-  requireGit(merged, ["add", "merged.txt"], "git add merged");
+  requireGit(merged, ["add", ".gitignore", "merged.txt"], "git add merged");
   requireGit(
     merged,
     [
@@ -114,6 +94,19 @@ const makeProject = (): {
     "git commit merged",
   );
   requireGit(main, ["merge", "--ff-only", "feature/merged"], "git merge");
+
+  for (const [branch, path] of [
+    ["feature/unmerged", unmerged],
+    ["feature/dirty", dirty],
+    ["feature/open", open],
+    ["feature/missing", missing],
+  ] as const) {
+    requireGit(
+      main,
+      ["worktree", "add", "-q", "-b", branch, path, "main"],
+      `git worktree add ${branch}`,
+    );
+  }
 
   writeFileSync(join(unmerged, "unmerged.txt"), "unmerged\n");
   requireGit(unmerged, ["add", "unmerged.txt"], "git add unmerged");
@@ -287,6 +280,42 @@ describe("project gc", () => {
     expect(runner.calls.filter((call) => call.args[0] === "remove")).toHaveLength(0);
     expect(runner.calls.filter((call) => call.args[0] === "close")).toHaveLength(0);
     expect(formatProjectGc(report)).toContain("Dry run: no changes made.");
+  });
+
+  it("shares main-checkout identity between gc and update for a symlinked root", () => {
+    const project = makeProject();
+    const symlinkedMain = `${project.main}-alias`;
+    symlinkSync(project.main, symlinkedMain);
+    created.push(symlinkedMain);
+    const runner = createRecordingRunner({
+      git: runFixtureGit,
+      "herdr worktree list": result(0, herdrList(project)),
+      "devenv update agents": result(0),
+      "devenv shell -- true": result(0),
+    });
+
+    const gc = runProjectGc({
+      buildDirectories: undefined,
+      dryRun: true,
+      herdrPath: undefined,
+      projectPath: symlinkedMain,
+      runner,
+    });
+    const update = runProjectUpdate({ projectPath: symlinkedMain, runner });
+    const missingPath = resolveMissing(project.missing);
+
+    expect(gc.mainCheckout).toBe(realpathSync(project.main));
+    expect(update.mainCheckout).toBe(gc.mainCheckout);
+    expect(gc.detachedWorkspaces).toEqual([
+      { path: missingPath, workspaceId: "detached-workspace" },
+    ]);
+    expect(update.items).toContainEqual({
+      kind: "worktree",
+      path: missingPath,
+      success: true,
+      error: undefined,
+    });
+    expect(formatProjectUpdate(update)).toContain(`Worktree (${missingPath}): succeeded`);
   });
 
   it("removes only the safe set, closes detached workspaces, and preserves branches", () => {

@@ -1,12 +1,5 @@
-import { realpathSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
-import {
-  errorMessage,
-  runRequiredCommand,
-  runRequiredGitCommand,
-  type CommandRunner,
-} from "./command-runner.ts";
-import { resolveMainCheckout } from "./worktree-setup.ts";
+import { errorMessage, runRequiredCommand, type CommandRunner } from "./command-runner.ts";
+import { listLinkedWorktrees, resolveMainCheckout, type WorkspaceWorktree } from "./workspace.ts";
 
 /**
  * The operation represented by one project-update report item.
@@ -38,36 +31,6 @@ export type ProjectUpdateResult = {
 export type ProjectUpdateOptions = {
   readonly projectPath: string;
   readonly runner: CommandRunner;
-};
-
-const comparablePath = (path: string): string => {
-  try {
-    return realpathSync(path);
-  } catch {
-    return resolve(path);
-  }
-};
-
-const samePath = (left: string, right: string): boolean =>
-  comparablePath(left) === comparablePath(right);
-
-const worktreePaths = (stdout: string, mainCheckout: string): readonly string[] =>
-  stdout
-    .split(/\r?\n/u)
-    .filter((line) => line.startsWith("worktree "))
-    .map((line) => line.slice("worktree ".length))
-    .filter((path) => path.length > 0)
-    .map((path) => (isAbsolute(path) ? path : resolve(mainCheckout, path)))
-    .filter((path) => !samePath(path, mainCheckout));
-
-const listWorktrees = (mainCheckout: string, runner: CommandRunner): readonly string[] => {
-  const result = runRequiredGitCommand(
-    runner,
-    "git worktree list",
-    ["-C", mainCheckout, "worktree", "list", "--porcelain"],
-    mainCheckout,
-  );
-  return worktreePaths(result.stdout, mainCheckout);
 };
 
 const runDevenv = (
@@ -116,9 +79,9 @@ export const runProjectUpdate = (options: ProjectUpdateOptions): ProjectUpdateRe
     ),
   );
 
-  let worktrees: readonly string[];
+  let worktrees: readonly WorkspaceWorktree[];
   try {
-    worktrees = listWorktrees(mainCheckout, options.runner);
+    worktrees = listLinkedWorktrees(mainCheckout, options.runner);
   } catch (error) {
     items.push({
       kind: "worktree-list",
@@ -133,7 +96,7 @@ export const runProjectUpdate = (options: ProjectUpdateOptions): ProjectUpdateRe
       runDevenv(
         options.runner,
         "worktree",
-        worktree,
+        worktree.path,
         ["shell", "--", "true"],
         "devenv shell -- true",
       ),

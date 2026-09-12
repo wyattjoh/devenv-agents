@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, readdirSync, realpathSync, rmSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   errorMessage,
   runRequiredCommand,
@@ -15,7 +15,15 @@ import {
   type WorktreeStatusEntry,
 } from "./worktree-status.ts";
 import {
+  canonicalPath,
+  getManagedWorktreeRoot,
+  listLinkedWorktrees,
   resolveMainCheckout,
+  samePath,
+  worktreeLabel,
+  type WorkspaceWorktree,
+} from "./workspace.ts";
+import {
   runWorktreeSetup,
   type SyncReferences,
   type WorktreeSetupResult,
@@ -25,17 +33,6 @@ import {
  * Per-worktree build directories reclaimed by project garbage collection.
  */
 export const WORKTREE_BUILD_DIRECTORIES = ["target", "node_modules"] as const;
-
-/**
- * One Git worktree as reported by `git worktree list --porcelain`.
- */
-export type ProjectGitWorktree = {
-  readonly path: string;
-  readonly branch: string | undefined;
-  readonly linked: boolean;
-  readonly detached: boolean;
-  readonly prunable: boolean;
-};
 
 /**
  * One Herdr worktree as reported by `herdr worktree list`.
@@ -172,13 +169,6 @@ export type AdoptWorktreesResult = {
   readonly exitCode: number;
 };
 
-type PorcelainRecord = {
-  readonly path: string;
-  readonly branch: string | undefined;
-  readonly detached: boolean;
-  readonly prunable: boolean;
-};
-
 type JsonRecord = Record<string, unknown>;
 
 const herdrCommand = (herdrPath: string | undefined): string => herdrPath ?? "herdr";
@@ -196,26 +186,6 @@ const readRecord = (record: JsonRecord, key: string): JsonRecord | undefined => 
   return isRecord(value) ? value : undefined;
 };
 
-const comparablePath = (path: string): string => {
-  const absolute = resolve(path);
-  try {
-    return realpathSync(absolute);
-  } catch {
-    const missingParts: string[] = [];
-    let existing = absolute;
-    while (!existsSync(existing)) {
-      const parent = dirname(existing);
-      if (parent === existing) return absolute;
-      missingParts.unshift(basename(existing));
-      existing = parent;
-    }
-    return join(realpathSync(existing), ...missingParts);
-  }
-};
-
-const samePath = (left: string, right: string): boolean =>
-  comparablePath(left) === comparablePath(right);
-
 const isDirectory = (path: string): boolean => {
   try {
     return lstatSync(path).isDirectory();
@@ -225,7 +195,7 @@ const isDirectory = (path: string): boolean => {
 };
 
 const isSameOrDescendant = (parent: string, candidate: string): boolean => {
-  const child = relative(comparablePath(parent), comparablePath(candidate));
+  const child = relative(canonicalPath(parent), canonicalPath(candidate));
   return (
     child.length === 0 || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child))
   );
@@ -234,64 +204,6 @@ const isSameOrDescendant = (parent: string, candidate: string): boolean => {
 const normalizeBranch = (value: string | undefined): string | undefined => {
   if (value === undefined) return undefined;
   return value.startsWith("refs/heads/") ? value.slice("refs/heads/".length) : value;
-};
-
-const parsePorcelainRecords = (stdout: string): readonly PorcelainRecord[] => {
-  const records: PorcelainRecord[] = [];
-  for (const block of stdout.split(/\r?\n\r?\n/u)) {
-    const lines = block.split(/\r?\n/u).filter((line) => line.length > 0);
-    if (lines.length === 0) continue;
-    const worktreePath = lines
-      .find((line) => line.startsWith("worktree "))
-      ?.slice("worktree ".length);
-    if (worktreePath === undefined || worktreePath.length === 0) {
-      throw new Error("git worktree list returned a record without a worktree path");
-    }
-    records.push({
-      path: comparablePath(worktreePath),
-      branch: normalizeBranch(
-        lines.find((line) => line.startsWith("branch "))?.slice("branch ".length),
-      ),
-      detached: lines.includes("detached"),
-      prunable: lines.some((line) => line.startsWith("prunable ")),
-    });
-  }
-  if (records.length === 0) throw new Error("git worktree list returned no worktrees");
-  return records;
-};
-
-/**
- * Parses Git's porcelain worktree listing into normalized worktree records.
- *
- * @param stdout Porcelain output from `git worktree list --porcelain`.
- * @param mainCheckout Main checkout used to mark the primary entry as unlinked.
- * @returns Normalized Git worktree records.
- */
-const parseProjectGitWorktrees = (
-  stdout: string,
-  mainCheckout: string,
-): readonly ProjectGitWorktree[] => {
-  const main = comparablePath(mainCheckout);
-  return parsePorcelainRecords(stdout).map((record) => ({
-    path: record.path,
-    branch: record.branch,
-    linked: !samePath(record.path, main),
-    detached: record.detached,
-    prunable: record.prunable,
-  }));
-};
-
-const listGitWorktrees = (
-  mainCheckout: string,
-  runner: CommandRunner,
-): readonly ProjectGitWorktree[] => {
-  const result = runRequiredGitCommand(
-    runner,
-    "git worktree list",
-    ["-C", mainCheckout, "worktree", "list", "--porcelain"],
-    mainCheckout,
-  );
-  return parseProjectGitWorktrees(result.stdout, mainCheckout);
 };
 
 const currentBranch = (mainCheckout: string, runner: CommandRunner): string => {
@@ -324,7 +236,7 @@ const parseHerdrWorktrees = (stdout: string): readonly ProjectHerdrWorktree[] =>
     if (path === undefined || path.length === 0) return [];
     return [
       {
-        path: comparablePath(path),
+        path: canonicalPath(path),
         branch: normalizeBranch(readString(value, "branch")),
         linked: value.is_linked_worktree !== false,
         openWorkspaceId: readString(value, "open_workspace_id"),
@@ -352,7 +264,7 @@ const statusForPath = (
   entries: readonly WorktreeStatusEntry[],
   path: string,
 ): WorktreeStatusEntry | undefined => {
-  const canonical = comparablePath(path);
+  const canonical = canonicalPath(path);
   const hash = worktreeStatusHash(canonical);
   return entries.find(
     (entry) =>
@@ -383,9 +295,9 @@ const existingBuildDirectories = (
 
 const collectUnregisteredDirectories = (
   mainCheckout: string,
-  gitWorktrees: readonly ProjectGitWorktree[],
+  gitWorktrees: readonly WorkspaceWorktree[],
 ): readonly UnregisteredWorktreeDirectory[] => {
-  const root = resolve(mainCheckout, ".claude", "worktrees");
+  const root = getManagedWorktreeRoot(mainCheckout);
   if (!isDirectory(root)) return [];
   const livePaths = gitWorktrees.map((worktree) => worktree.path);
   const unregistered: UnregisteredWorktreeDirectory[] = [];
@@ -393,7 +305,7 @@ const collectUnregisteredDirectories = (
   const visit = (parent: string): void => {
     for (const entry of readdirSync(parent, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      const child = comparablePath(join(parent, entry.name));
+      const child = canonicalPath(join(parent, entry.name));
       if (livePaths.some((path) => samePath(path, child))) continue;
       if (livePaths.some((path) => isSameOrDescendant(child, path))) {
         visit(child);
@@ -410,7 +322,7 @@ const collectUnregisteredDirectories = (
 const worktreeByPath = (
   worktrees: readonly ProjectHerdrWorktree[],
 ): ReadonlyMap<string, ProjectHerdrWorktree> =>
-  new Map(worktrees.map((worktree) => [comparablePath(worktree.path), worktree]));
+  new Map(worktrees.map((worktree) => [canonicalPath(worktree.path), worktree]));
 
 /**
  * Builds a non-mutating cleanup plan for one project's worktrees.
@@ -421,22 +333,22 @@ const worktreeByPath = (
 const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan => {
   const mainCheckout = resolveMainCheckout(options.projectPath, options.runner);
   const targetBranch = currentBranch(mainCheckout, options.runner);
-  const gitWorktrees = listGitWorktrees(mainCheckout, options.runner);
+  const gitWorktrees = listLinkedWorktrees(mainCheckout, options.runner);
   const herdrWorktrees = listHerdrWorktrees(options, mainCheckout);
   const herdrByPath = worktreeByPath(herdrWorktrees);
   const statusEntries = listWorktreeStatuses(mainCheckout);
   const existingGitWorktrees = gitWorktrees.filter((worktree) => isDirectory(worktree.path));
   const registeredPaths = new Set(
-    existingGitWorktrees.map((worktree) => comparablePath(worktree.path)),
+    existingGitWorktrees.map((worktree) => canonicalPath(worktree.path)),
   );
   const registeredStatusHashes = new Set(
-    existingGitWorktrees.map((worktree) => worktreeStatusHash(comparablePath(worktree.path))),
+    existingGitWorktrees.map((worktree) => worktreeStatusHash(canonicalPath(worktree.path))),
   );
   const removable: RemovableWorktree[] = [];
   const busy: BusyWorktree[] = [];
 
-  for (const worktree of gitWorktrees.filter((candidate) => candidate.linked)) {
-    const herdr = herdrByPath.get(comparablePath(worktree.path));
+  for (const worktree of gitWorktrees) {
+    const herdr = herdrByPath.get(canonicalPath(worktree.path));
     const statusEntry = statusForPath(statusEntries, worktree.path);
     const status = statusEntry?.status;
     const statusClaimed =
@@ -555,7 +467,7 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
   const staleStatuses: StaleWorktreeStatus[] = statusEntries
     .filter((entry) => {
       if (entry.status?.path === undefined) return !registeredStatusHashes.has(entry.hash);
-      return !registeredPaths.has(comparablePath(entry.status.path));
+      return !registeredPaths.has(canonicalPath(entry.status.path));
     })
     .map((entry) => ({
       path: entry.status?.path ?? entry.statusPath,
@@ -756,10 +668,8 @@ export const formatProjectGc = (
   return `${lines.join("\n")}\n`;
 };
 
-const worktreeLabel = (worktree: ProjectGitWorktree): string => {
-  const branch = worktree.branch?.slice(worktree.branch.lastIndexOf("/") + 1);
-  return branch === undefined || branch.length === 0 ? basename(worktree.path) : branch;
-};
+const worktreeLabelFor = (worktree: WorkspaceWorktree): string =>
+  worktree.branch === undefined ? basename(worktree.path) : worktreeLabel(worktree.branch);
 
 const appendError = (current: string | undefined, next: string): string =>
   current === undefined ? next : `${current}; ${next}`;
@@ -767,7 +677,7 @@ const appendError = (current: string | undefined, next: string): string =>
 const openWorktree = (
   options: AdoptWorktreesOptions,
   mainCheckout: string,
-  worktree: ProjectGitWorktree,
+  worktree: WorkspaceWorktree,
 ): { readonly opened: boolean; readonly error: string | undefined } => {
   try {
     runRequiredCommand(
@@ -782,7 +692,7 @@ const openWorktree = (
         "--path",
         worktree.path,
         "--label",
-        worktreeLabel(worktree),
+        worktreeLabelFor(worktree),
         "--no-focus",
       ],
       { cwd: mainCheckout, env: undefined },
@@ -805,19 +715,19 @@ const openWorktree = (
  */
 export const runAdoptWorktrees = (options: AdoptWorktreesOptions): AdoptWorktreesResult => {
   const mainCheckout = resolveMainCheckout(options.projectPath, options.runner);
-  const gitWorktrees = listGitWorktrees(mainCheckout, options.runner);
+  const gitWorktrees = listLinkedWorktrees(mainCheckout, options.runner);
   const herdrWorktrees = listHerdrWorktrees(options, mainCheckout);
   const herdrByPath = worktreeByPath(herdrWorktrees);
   const items: AdoptWorktreeItem[] = [];
 
-  for (const worktree of gitWorktrees.filter((candidate) => candidate.linked)) {
+  for (const worktree of gitWorktrees) {
     if (!isDirectory(worktree.path)) {
       items.push({
         path: worktree.path,
         branch: worktree.branch,
         setup: undefined,
         opened: false,
-        workspaceId: herdrByPath.get(worktree.path)?.openWorkspaceId,
+        workspaceId: herdrByPath.get(canonicalPath(worktree.path))?.openWorkspaceId,
         error: "checkout is missing",
       });
       continue;
@@ -839,7 +749,7 @@ export const runAdoptWorktrees = (options: AdoptWorktreesOptions): AdoptWorktree
       error = errorMessage(caught);
     }
 
-    const herdr = herdrByPath.get(comparablePath(worktree.path));
+    const herdr = herdrByPath.get(canonicalPath(worktree.path));
     let opened = false;
     if (herdr?.openWorkspaceId === undefined) {
       const open = openWorktree(options, mainCheckout, worktree);

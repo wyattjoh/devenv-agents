@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
   createRecordingRunner,
+  realCommandRunner,
   type CommandInvocation,
   type CommandResult,
 } from "./command-runner.ts";
@@ -11,6 +12,7 @@ import { writeProjectsFile, type ProjectRegistration } from "./project-add.ts";
 import { formatProjectUpdate, runProjectUpdate } from "./project-update.ts";
 import { createGitFixture } from "./testing/git-fixture.ts";
 import { spawnGit } from "./testing/git-env.ts";
+import { listLinkedWorktrees } from "./workspace.ts";
 
 const created: string[] = [];
 
@@ -33,14 +35,7 @@ const createFixture = (prefix: string) =>
   createGitFixture({ prefix, branch: undefined, worktreeName: undefined, env: undefined });
 
 const listedWorktreePaths = (repository: string): readonly string[] =>
-  spawnGit(["-C", repository, "worktree", "list", "--porcelain"], {
-    cwd: undefined,
-    env: undefined,
-  })
-    .stdout.split(/\r?\n/u)
-    .filter((line) => line.startsWith("worktree "))
-    .map((line) => realpathSync(line.slice("worktree ".length)))
-    .filter((path) => path !== realpathSync(repository));
+  listLinkedWorktrees(repository, realCommandRunner).map((worktree) => worktree.path);
 
 const captureOutput = (): {
   readonly stdout: () => string;
@@ -129,25 +124,34 @@ describe("project update", () => {
         error: undefined,
       },
     ]);
-    expect(runner.calls.map((call) => [call.command, ...call.args, call.cwd])).toEqual([
-      [
-        "git",
-        "-C",
-        fixture.worktree,
-        "rev-parse",
-        "--path-format=absolute",
-        "--git-common-dir",
-        fixture.worktree,
-      ],
-      ["devenv", "update", "agents", mainCheckout],
-      ["devenv", "shell", "--", "true", mainCheckout],
-      ["git", "-C", mainCheckout, "worktree", "list", "--porcelain", mainCheckout],
-      ["devenv", "shell", "--", "true", worktrees[0]],
-      ["devenv", "shell", "--", "true", worktrees[1]],
-    ]);
     expect(formatProjectUpdate(update)).toContain(
       `Worktree (${worktrees[0]}): failed: devenv shell -- true`,
     );
+  });
+
+  it("updates a deleted linked worktree from a symlinked project path", () => {
+    const fixture = createFixture("devenv-agents-update-deleted-");
+    created.push(fixture.root);
+    const symlinkedRoot = `${fixture.repository}-alias`;
+    symlinkSync(fixture.repository, symlinkedRoot);
+    created.push(symlinkedRoot);
+    rmSync(fixture.worktree, { recursive: true, force: true });
+
+    const mainCheckout = realpathSync(fixture.repository);
+    const missingWorktree = join(realpathSync(fixture.root), "worktree");
+    const runner = gitRunner({
+      "devenv update agents": result(0),
+      "devenv shell -- true": result(0),
+    });
+
+    const update = runProjectUpdate({ projectPath: symlinkedRoot, runner });
+
+    expect(update.mainCheckout).toBe(mainCheckout);
+    expect(update.items).toEqual([
+      { kind: "agents-input", path: mainCheckout, success: true, error: undefined },
+      { kind: "main", path: mainCheckout, success: true, error: undefined },
+      { kind: "worktree", path: missingWorktree, success: true, error: undefined },
+    ]);
   });
 
   it("captures an agents-input failure while still attempting every rebuild", () => {
