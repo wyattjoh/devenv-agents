@@ -20,7 +20,7 @@ import {
 import type { HerdrClient } from "./herdr-client.ts";
 import { assertProjectPluginEnabled } from "./worktree-plugin.ts";
 import { readProjectDeclaration, type ProjectDeclaration } from "./project-declaration.ts";
-import type { SyncReferences } from "./worktree-setup.ts";
+import type { SyncReferences } from "./project-sync.ts";
 
 /**
  * Operating systems supported by the project registry.

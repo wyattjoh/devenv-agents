@@ -23,11 +23,8 @@ import {
   worktreeLabel,
   type WorkspaceWorktree,
 } from "./workspace.ts";
-import {
-  runWorktreeSetup,
-  type SyncReferences,
-  type WorktreeSetupResult,
-} from "./worktree-setup.ts";
+import { runWorktreeSetup, type WorktreeSetupResult } from "./worktree-setup.ts";
+import type { SyncReferences } from "./project-sync.ts";
 
 /**
  * Per-worktree build directories reclaimed by project garbage collection.

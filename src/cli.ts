@@ -23,12 +23,8 @@ import {
   runWorktreeEvent,
   type PluginEnvironment,
 } from "./worktree-plugin.ts";
-import { createSyncReferences, runProjectSync } from "./project-sync.ts";
-import {
-  runInteractiveWorktreeSetup,
-  runWorktreeSetup,
-  type SyncReferences,
-} from "./worktree-setup.ts";
+import { createSyncReferences, runProjectSync, type SyncReferences } from "./project-sync.ts";
+import { runInteractiveWorktreeSetup, runWorktreeSetup } from "./worktree-setup.ts";
 
 /**
  * The public command name used by the standalone binary and the Bun entrypoint.

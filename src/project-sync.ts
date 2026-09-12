@@ -17,7 +17,6 @@ import {
 } from "./command-runner.ts";
 import { readProjectDeclaration, type ProjectDeclaration } from "./project-declaration.ts";
 import { resolveMainCheckout } from "./workspace.ts";
-import type { SyncReferences, SyncRequest } from "./worktree-setup.ts";
 
 /** The local Claude settings file populated by tree grants. */
 export const CLAUDE_LOCAL_SETTINGS_PATH = join(".claude", "settings.local.json");
@@ -65,6 +64,29 @@ export type ProjectSyncResult = {
   readonly moduleInputs: readonly string[];
   readonly serviceEndpoints: readonly string[];
   readonly missingReferences: readonly string[];
+};
+
+/**
+ * The input supplied to the reference synchronization seam.
+ *
+ * @param projectRoot Main checkout whose shared state receives materialized services.
+ * @param worktreePath Worktree receiving tree and module grants.
+ * @param declaration Parsed project declaration to materialize.
+ */
+export type SyncRequest = {
+  readonly projectRoot: string;
+  readonly worktreePath: string;
+  readonly declaration: ProjectDeclaration;
+};
+
+/**
+ * Synchronizes one worktree's declared references.
+ *
+ * @param request Setup context and normalized project declaration.
+ * @returns Nothing; implementations persist any materialized files as their side effect.
+ */
+export type SyncReferences = {
+  (request: SyncRequest): void;
 };
 
 /** Options for invoking `project sync` from a checkout path. */

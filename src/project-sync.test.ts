@@ -24,9 +24,9 @@ import {
   createSyncReferences,
   MissingReferencedCheckoutsError,
   syncProjectReferences,
+  type SyncRequest,
 } from "./project-sync.ts";
 import { withGitFixture } from "./testing/git-fixture.ts";
-import type { SyncRequest } from "./worktree-setup.ts";
 
 const created: string[] = [];
 
