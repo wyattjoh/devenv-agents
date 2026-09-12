@@ -240,50 +240,47 @@ describe("project CLI", () => {
     const root = mkdtempSync(join("/tmp", "devenv-agents-cli-fanout-"));
     const first = join(root, "first");
     const second = join(root, "second");
-    const projectsFile = join(root, "projects.toml");
     mkdirSync(first, { recursive: true });
     mkdirSync(second, { recursive: true });
-    writeFileSync(
-      projectsFile,
-      [
-        "[[projects]]",
-        'repo = "github.com/example/first"',
-        `path = ${JSON.stringify(first)}`,
-        'session = "first"',
-        "",
-        "[[projects]]",
-        'repo = "github.com/example/second"',
-        `path = ${JSON.stringify(second)}`,
-        'session = "second"',
-        "",
-      ].join("\n"),
-    );
     created.push(root);
 
+    const projects = [
+      { repo: "github.com/example/first", path: first, session: "first" },
+      { repo: "github.com/example/second", path: second, session: "second" },
+    ];
     const runner = createRecordingRunner({
       git: (invocation) => {
         if (invocation.args.includes("rev-parse") && invocation.args.includes(first)) {
-          return result(1, "", "first unavailable");
+          return result(1, "", "first\nsecond");
         }
         if (invocation.args.includes("rev-parse")) {
           return result(0, `${invocation.args[1]}/.git\n`);
+        }
+        if (invocation.args.includes("worktree") && invocation.args.includes("list")) {
+          return result(0, `worktree ${second}\nHEAD fixture\nbranch refs/heads/main\n`);
         }
         return result(0);
       },
     });
     const output = captureOutput();
     const dependencies = createCliDependencies({
+      enumerateProjects: () => projects,
       runner,
-      environment: {
-        PROJECT_PLATFORM: "darwin",
-        PROJECT_PROJECTS_FILE: projectsFile,
-      },
+      environment: { PROJECT_PLATFORM: "darwin" },
     });
 
     expect(runCli(["update", "--all"], output.io, dependencies)).toBe(1);
-    expect(output.stdout()).toContain("[github.com/example/second] Agents input");
-    expect(output.stderr()).toContain(
-      "[github.com/example/first] project update: git rev-parse --git-common-dir failed",
+    const secondPath = realpathSync(second);
+    expect(output.stdout()).toBe(
+      [
+        `[github.com/example/second] Agents input (${secondPath}): succeeded`,
+        `[github.com/example/second] Main checkout (${secondPath}): succeeded`,
+        `[github.com/example/second] Summary: 2 succeeded, 0 failed`,
+        "",
+      ].join("\n"),
+    );
+    expect(output.stderr()).toBe(
+      "[github.com/example/first] project update: git rev-parse --git-common-dir failed with exit code 1: first\nsecond\n",
     );
     expect(
       runner.calls.some(
@@ -472,6 +469,18 @@ describe("project CLI", () => {
     expect(output.stderr()).toBe(
       "project worktree-setup: warm exploded\nPress Enter to retry or q to quit.\n",
     );
+  });
+
+  it("translates a setup failure without a message through the command entry", () => {
+    const bootstrap = createFakeWorktreeBootstrap({
+      run: () => ({ exitCode: 1, state: "failed", error: undefined }),
+    });
+    const dependencies = createCliDependencies({ bootstrap });
+    const output = captureOutput();
+
+    expect(runCli(["worktree-setup"], output.io, dependencies)).toBe(1);
+    expect(output.stdout()).toBe("");
+    expect(output.stderr()).toBe("project worktree-setup: setup failed\n");
   });
 
   it("runs the worktree event through the bootstrap request via runCli", () => {

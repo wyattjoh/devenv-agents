@@ -507,29 +507,19 @@ export const runProjectGc = (options: ProjectGcOptions): ProjectGcResult => {
 
 const displayBranch = (branch: string | undefined): string => branch ?? "detached";
 
-const formatSection = (title: string, lines: readonly string[]): readonly string[] => [
-  `${title}:`,
-  ...(lines.length === 0 ? ["  (none)"] : lines.map((line) => `  ${line}`)),
-];
+const formatSection = (title: string, lines: readonly string[]): string =>
+  `${title}:\n${lines.length === 0 ? "  (none)" : lines.map((line) => `  ${line}`).join("\n")}`;
 
 /**
- * Formats a garbage-collection result for a human-readable CLI report.
+ * Formats garbage-collection output as logical records without separators.
  *
  * @param result Garbage-collection plan and applied actions.
- * @param projectName Optional project prefix used by `--all`.
- * @returns A newline-terminated report containing every classification.
+ * @returns Ordered report records, including each section's continuation lines.
  */
-export const formatProjectGc = (
-  result: ProjectGcResult,
-  projectName: string | undefined = undefined,
-): string => {
-  const prefix = projectName === undefined ? "" : `[${projectName}] `;
-  const lines: string[] = [
-    `${prefix}Project: ${result.mainCheckout}`,
-    `${prefix}Target: ${result.targetBranch}`,
-  ];
+export const formatProjectGcRecords = (result: ProjectGcResult): readonly string[] => {
+  const records: string[] = [`Project: ${result.mainCheckout}`, `Target: ${result.targetBranch}`];
   const section = (title: string, values: readonly string[]): void => {
-    lines.push(...formatSection(`${prefix}${title}`, values));
+    records.push(formatSection(title, values));
   };
 
   section(
@@ -561,23 +551,39 @@ export const formatProjectGc = (
   );
 
   if (result.dryRun) {
-    lines.push(`${prefix}Dry run: no changes made.`);
+    records.push("Dry run: no changes made.");
   } else {
-    lines.push(`${prefix}Removed worktrees: ${result.removed.length}`);
-    lines.push(`${prefix}Closed workspaces: ${result.closedWorkspaces.length}`);
-    lines.push(`${prefix}Deleted stale statuses: ${result.deletedStatuses.length}`);
+    records.push(`Removed worktrees: ${result.removed.length}`);
+    records.push(`Closed workspaces: ${result.closedWorkspaces.length}`);
+    records.push(`Deleted stale statuses: ${result.deletedStatuses.length}`);
     for (const failure of result.failures) {
-      lines.push(`${prefix}Failed to ${failure.action} ${failure.path}: ${failure.error}`);
+      records.push(`Failed to ${failure.action} ${failure.path}: ${failure.error}`);
     }
   }
-  return `${lines.join("\n")}\n`;
+  return records;
 };
+
+/**
+ * Formats a garbage-collection result for a human-readable CLI report.
+ *
+ * @param result Garbage-collection plan and applied actions.
+ * @returns A newline-terminated report containing every classification.
+ */
+export const formatProjectGc = (result: ProjectGcResult): string =>
+  `${formatProjectGcRecords(result).join("\n")}\n`;
 
 const worktreeLabelFor = (worktree: WorkspaceWorktree): string =>
   worktree.branch === undefined ? basename(worktree.path) : worktreeLabel(worktree.branch);
 
-const appendError = (current: string | undefined, next: string): string =>
-  current === undefined ? next : `${current}; ${next}`;
+const appendError = (current: string | undefined, next: string): string => {
+  if (current === undefined) return next;
+  return `${current}; ${next}`;
+};
+
+const errorSuffix = (error: string | undefined): string => {
+  if (error === undefined) return "";
+  return `: ${error}`;
+};
 
 const openWorktree = (
   options: AdoptWorktreesOptions,
@@ -666,20 +672,15 @@ export const runAdoptWorktrees = (options: AdoptWorktreesOptions): AdoptWorktree
 };
 
 /**
- * Formats worktree adoption results for a human-readable CLI response.
+ * Formats worktree adoption output as logical records without separators.
  *
  * @param result Adoption result to format.
- * @param projectName Optional project prefix used by `--all`.
- * @returns A newline-terminated report.
+ * @returns Ordered report records, preserving embedded continuation lines.
  */
-export const formatAdoptWorktrees = (
-  result: AdoptWorktreesResult,
-  projectName: string | undefined = undefined,
-): string => {
-  const prefix = projectName === undefined ? "" : `[${projectName}] `;
-  const lines = [`${prefix}Project: ${result.mainCheckout}`];
+export const formatAdoptWorktreesRecords = (result: AdoptWorktreesResult): readonly string[] => {
+  const records = [`Project: ${result.mainCheckout}`];
   if (result.items.length === 0) {
-    lines.push(`${prefix}No linked worktrees found.`);
+    records.push("No linked worktrees found.");
   } else {
     for (const item of result.items) {
       const bootstrapState = item.bootstrap?.state ?? "not-run";
@@ -688,10 +689,18 @@ export const formatAdoptWorktrees = (
         : item.workspaceId === undefined
           ? "already absent"
           : `open (${item.workspaceId})`;
-      const suffix = item.error === undefined ? "" : `: ${item.error}`;
-      lines.push(`${prefix}${item.path} (${bootstrapState}, ${workspace})${suffix}`);
+      records.push(`${item.path} (${bootstrapState}, ${workspace})${errorSuffix(item.error)}`);
     }
   }
-  lines.push(`${prefix}Summary: ${result.items.length} worktrees, exit ${result.exitCode}`);
-  return `${lines.join("\n")}\n`;
+  records.push(`Summary: ${result.items.length} worktrees, exit ${result.exitCode}`);
+  return records;
 };
+
+/**
+ * Formats worktree adoption results for a human-readable CLI response.
+ *
+ * @param result Adoption result to format.
+ * @returns A newline-terminated report.
+ */
+export const formatAdoptWorktrees = (result: AdoptWorktreesResult): string =>
+  `${formatAdoptWorktreesRecords(result).join("\n")}\n`;

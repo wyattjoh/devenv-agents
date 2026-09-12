@@ -122,24 +122,33 @@ const itemLabel = (kind: ProjectUpdateKind): string => {
   return "Worktree";
 };
 
+const itemStatus = (item: ProjectUpdateItem): string => {
+  if (item.success) return "succeeded";
+  if (item.error === undefined) return "failed: unknown error";
+  return `failed: ${item.error}`;
+};
+
+/**
+ * Formats update output as logical records without separators.
+ *
+ * @param result Report returned by {@link runProjectUpdate}.
+ * @returns Ordered report records, preserving embedded continuation lines.
+ */
+export const formatProjectUpdateRecords = (result: ProjectUpdateResult): readonly string[] => {
+  const records = result.items.map(
+    (item) => `${itemLabel(item.kind)} (${item.path}): ${itemStatus(item)}`,
+  );
+  const succeeded = result.items.filter((item) => item.success).length;
+  const failed = result.items.length - succeeded;
+  records.push(`Summary: ${succeeded} succeeded, ${failed} failed`);
+  return records;
+};
+
 /**
  * Formats an update report for a human-readable CLI response.
  *
  * @param result Report returned by {@link runProjectUpdate}.
- * @param projectName Optional prefix used by `update --all`.
  * @returns One newline-terminated summary containing every step and failure.
  */
-export const formatProjectUpdate = (
-  result: ProjectUpdateResult,
-  projectName: string | undefined = undefined,
-): string => {
-  const prefix = projectName === undefined ? "" : `[${projectName}] `;
-  const lines = result.items.map((item) => {
-    const status = item.success ? "succeeded" : `failed: ${item.error ?? "unknown error"}`;
-    return `${prefix}${itemLabel(item.kind)} (${item.path}): ${status}`;
-  });
-  const succeeded = result.items.filter((item) => item.success).length;
-  const failed = result.items.length - succeeded;
-  lines.push(`${prefix}Summary: ${succeeded} succeeded, ${failed} failed`);
-  return `${lines.join("\n")}\n`;
-};
+export const formatProjectUpdate = (result: ProjectUpdateResult): string =>
+  `${formatProjectUpdateRecords(result).join("\n")}\n`;

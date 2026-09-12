@@ -76,8 +76,6 @@ export const runWorktreeCreate = (options: WorktreeCreateOptions): WorktreeCreat
     sleep: options.sleep,
   });
   if (bootstrap.state === "timeout") throw new Error("worktree bootstrap timed out");
-  if (bootstrap.state === "failed") {
-    throw new Error(bootstrap.error ?? "worktree bootstrap failed");
-  }
+  if (bootstrap.state === "failed") throw bootstrap.error;
   return { ...ids, branch: options.branch, worktreePath };
 };

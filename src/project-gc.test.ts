@@ -563,23 +563,11 @@ describe("adopt-worktrees", () => {
 
   it("runs both --all commands for every registered Darwin project", () => {
     const projects = [makeProject(), makeProject()];
-    const registryRoot = mkdtempSync(join("/tmp", "devenv-agents-gc-registry-"));
-    const projectsFile = join(registryRoot, "projects.toml");
-    writeFileSync(
-      projectsFile,
-      projects
-        .map((project, index) =>
-          [
-            "[[projects]]",
-            `repo = ${JSON.stringify(`forge/example/project-${index}`)}`,
-            `path = ${JSON.stringify(project.main)}`,
-            `session = ${JSON.stringify(`project-${index}`)}`,
-            "",
-          ].join("\n"),
-        )
-        .join("\n"),
-    );
-    created.push(registryRoot);
+    const registrations = projects.map((project, index) => ({
+      repo: `forge/example/project-${index}`,
+      path: project.main,
+      session: `project-${index}`,
+    }));
 
     let herdrListIndex = 0;
     const listedCwds: string[] = [];
@@ -595,21 +583,79 @@ describe("adopt-worktrees", () => {
       closeWorkspace: (workspaceId, cwd) => closedWorkspaces.push(`${cwd ?? ""}:${workspaceId}`),
       openWorktree: ({ cwd }) => openedCwds.push(cwd),
     });
-    const runner = createRecordingRunner({ git: runFixtureGit });
+    const projectPaths = projects.map((project) => ({
+      main: realpathSync(project.main),
+      merged: realpathSync(project.merged),
+      dirty: realpathSync(project.dirty),
+      open: realpathSync(project.open),
+      unmerged: realpathSync(project.unmerged),
+      missing: resolveMissing(project.missing),
+      stray: realpathSync(project.stray),
+    }));
+    const firstMain = projectPaths[0]!.main;
+    const runner = createRecordingRunner({
+      git: (invocation) => {
+        if (invocation.args.includes("merge-base") && invocation.args.includes(firstMain)) {
+          return result(1);
+        }
+        return runFixtureGit(invocation);
+      },
+    });
     const dependencies = createCliDependencies({
       cwd: projects[0]?.main,
+      enumerateProjects: () => registrations,
       runner,
       herdrClient,
-      environment: { PROJECT_PLATFORM: "darwin", PROJECT_PROJECTS_FILE: projectsFile },
+      environment: { PROJECT_PLATFORM: "darwin" },
     });
 
     const gcOutput = captureOutput();
     expect(runCli(["gc", "--all"], gcOutput.io, dependencies)).toBe(0);
-    expect(gcOutput.stdout()).toContain(`Project: ${realpathSync(projects[0]!.main)}`);
-    expect(gcOutput.stdout()).toContain(`Project: ${realpathSync(projects[1]!.main)}`);
+    expect(gcOutput.stdout()).toBe(
+      [
+        `[${registrations[0]!.repo}] Project: ${projectPaths[0]!.main}`,
+        `[${registrations[0]!.repo}] Target: main`,
+        `[${registrations[0]!.repo}] Removable worktrees:`,
+        "  (none)",
+        `[${registrations[0]!.repo}] Busy worktrees:`,
+        `  ${projectPaths[0]!.merged} (feature/merged: branch is not merged into the target)`,
+        `  ${projectPaths[0]!.dirty} (feature/dirty: worktree is dirty)`,
+        `  ${projectPaths[0]!.open} (feature/open: workspace is open)`,
+        `  ${projectPaths[0]!.unmerged} (feature/unmerged: branch is not merged into the target)`,
+        `[${registrations[0]!.repo}] Detached workspaces:`,
+        `  ${projectPaths[0]!.missing} (workspace detached-workspace)`,
+        `[${registrations[0]!.repo}] Stale status entries:`,
+        "  (none)",
+        `[${registrations[0]!.repo}] Unregistered directories:`,
+        `  ${projectPaths[0]!.stray}`,
+        `[${registrations[0]!.repo}] Removed worktrees: 0`,
+        `[${registrations[0]!.repo}] Closed workspaces: 1`,
+        `[${registrations[0]!.repo}] Deleted stale statuses: 0`,
+        `[${registrations[1]!.repo}] Project: ${projectPaths[1]!.main}`,
+        `[${registrations[1]!.repo}] Target: main`,
+        `[${registrations[1]!.repo}] Removable worktrees:`,
+        `  ${projectPaths[1]!.merged} (feature/merged)`,
+        `  delete build directory ${projectPaths[1]!.merged}/target`,
+        `  delete build directory ${projectPaths[1]!.merged}/node_modules`,
+        `[${registrations[1]!.repo}] Busy worktrees:`,
+        `  ${projectPaths[1]!.dirty} (feature/dirty: worktree is dirty)`,
+        `  ${projectPaths[1]!.open} (feature/open: workspace is open)`,
+        `  ${projectPaths[1]!.unmerged} (feature/unmerged: branch is not merged into the target)`,
+        `[${registrations[1]!.repo}] Detached workspaces:`,
+        `  ${projectPaths[1]!.missing} (workspace detached-workspace)`,
+        `[${registrations[1]!.repo}] Stale status entries:`,
+        "  (none)",
+        `[${registrations[1]!.repo}] Unregistered directories:`,
+        `  ${projectPaths[1]!.stray}`,
+        `[${registrations[1]!.repo}] Removed worktrees: 1`,
+        `[${registrations[1]!.repo}] Closed workspaces: 1`,
+        `[${registrations[1]!.repo}] Deleted stale statuses: 0`,
+        "",
+      ].join("\n"),
+    );
     expect(closedWorkspaces).toEqual([
-      `${realpathSync(projects[0]!.main)}:detached-workspace`,
-      `${realpathSync(projects[1]!.main)}:detached-workspace`,
+      `${projectPaths[0]!.main}:detached-workspace`,
+      `${projectPaths[1]!.main}:detached-workspace`,
     ]);
 
     const adoptOutput = captureOutput();
@@ -618,16 +664,17 @@ describe("adopt-worktrees", () => {
     expect(adoptOutput.stdout()).toContain("[forge/example/project-1] Summary:");
     expect(herdrListIndex).toBe(4);
     expect(listedCwds).toEqual([
-      realpathSync(projects[0]!.main),
-      realpathSync(projects[1]!.main),
-      realpathSync(projects[0]!.main),
-      realpathSync(projects[1]!.main),
+      projectPaths[0]!.main,
+      projectPaths[1]!.main,
+      projectPaths[0]!.main,
+      projectPaths[1]!.main,
     ]);
     expect(openedCwds).toEqual([
-      realpathSync(projects[0]!.main),
-      realpathSync(projects[0]!.main),
-      realpathSync(projects[1]!.main),
-      realpathSync(projects[1]!.main),
+      projectPaths[0]!.main,
+      projectPaths[0]!.main,
+      projectPaths[0]!.main,
+      projectPaths[1]!.main,
+      projectPaths[1]!.main,
     ]);
   });
 });

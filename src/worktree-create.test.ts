@@ -145,6 +145,32 @@ describe("worktree creation", () => {
     expect(output.stderr()).toContain("project wt create: devenv shell -- true");
   });
 
+  it("uses the command-level fallback for an unreported bootstrap failure", () => {
+    const branch = "feature/unreported-failure";
+    const { mainCheckout } = makeProject(branch);
+    const herdrClient = createFakeHerdrClient({
+      listPlugins: () => [projectPlugin(true)],
+      createWorktree: () => ({ workspaceId: "w3", rootPaneId: "w3:p1" }),
+    });
+    const bootstrap = createFakeWorktreeBootstrap({
+      await: () => ({ state: "failed", error: undefined }),
+    });
+    const runner = createRecordingRunner({
+      [gitKey(mainCheckout)]: result(0, `${mainCheckout}/.git\n`),
+    });
+    const output = captureOutput();
+
+    expect(
+      runCli(
+        ["wt", "create", branch],
+        output.io,
+        createCliDependencies({ cwd: mainCheckout, runner, bootstrap, herdrClient }),
+      ),
+    ).toBe(1);
+    expect(output.stdout()).toBe("");
+    expect(output.stderr()).toBe("project wt create: worktree bootstrap failed\n");
+  });
+
   it("reports a bootstrap timeout as a distinct non-zero outcome", () => {
     const branch = "feature/timeout";
     const { mainCheckout, worktreePath } = makeProject(branch);

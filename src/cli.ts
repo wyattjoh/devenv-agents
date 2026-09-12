@@ -11,12 +11,15 @@ import {
 } from "./project-add.ts";
 import {
   formatProjectUpdate,
+  formatProjectUpdateRecords,
   runProjectUpdate,
   type ProjectUpdateResult,
 } from "./project-update.ts";
 import {
   formatAdoptWorktrees,
+  formatAdoptWorktreesRecords,
   formatProjectGc,
+  formatProjectGcRecords,
   runAdoptWorktrees,
   runProjectGc,
   type AdoptWorktreesResult,
@@ -91,6 +94,10 @@ export type CliDependencies = {
   readonly herdrClient: HerdrClient;
   readonly syncReferences: SyncReferences;
   readonly bootstrap: WorktreeBootstrap;
+  /**
+   * Project registry seam used by --all, or undefined to use the real enumerator.
+   */
+  readonly enumerateProjects: typeof enumerateProjects | undefined;
   /**
    * Environment snapshot used to resolve host settings, or undefined for process.env.
    */
@@ -179,6 +186,7 @@ const createDefaultDependencies = (
       runner,
       syncReferences,
     }),
+    enumerateProjects: undefined,
     environment,
     pluginPath: undefined,
   };
@@ -229,17 +237,16 @@ type ParsedCommandArguments = {
 type CommandContext = {
   readonly arguments: ParsedCommandArguments;
   readonly dependencies: CliDependencies;
+  readonly entry: CommandMetadata;
   readonly hostConfiguration: HostConfiguration;
   readonly output: CliIO;
   readonly pluginPath: string;
   readonly projectPath: string;
-  readonly projectName: string | undefined;
 };
 
 type CommandExecution<Result> = {
   readonly exitCode: number;
   readonly result: Result;
-  readonly stderr: string;
 };
 
 type LegacyHelpLayout = "standard" | "compact" | "expanded";
@@ -258,9 +265,12 @@ type CommandDefinition<Result> = CommandMetadata & {
   readonly format: (result: Result, context: CommandContext) => string;
 };
 
+type ReportRecordFormatter<Result> = (result: Result) => readonly string[];
+
 type FormattedCommandExecution = {
   readonly exitCode: number;
   readonly stdout: string;
+  readonly stdoutRecords: readonly string[] | undefined;
   readonly stderr: string;
 };
 
@@ -289,14 +299,9 @@ const valueFlag = (name: string, valueName: string, description: string): FlagSp
   description,
 });
 
-const commandExecution = <Result>(
-  result: Result,
-  exitCode = 0,
-  stderr = "",
-): CommandExecution<Result> => ({
+const commandExecution = <Result>(result: Result, exitCode = 0): CommandExecution<Result> => ({
   result,
   exitCode,
-  stderr,
 });
 
 const booleanFlagValue = (arguments_: ParsedCommandArguments, name: string): boolean =>
@@ -356,16 +361,30 @@ const parseCommandArguments = (
   return { positionals, flags };
 };
 
-const commandLabel = (entry: CommandEntry): string => entry.tokens.join(" ");
+const commandLabel = (entry: CommandMetadata): string => entry.tokens.join(" ");
+
+const commandErrorDetail = (entry: CommandMetadata | undefined, error: unknown): string => {
+  const message = errorMessage(error);
+  if (error !== undefined || entry === undefined) return message;
+  const label = commandLabel(entry);
+  if (label === "worktree-setup") return "setup failed";
+  if (label === "wt create") return "worktree bootstrap failed";
+  return message;
+};
+
+const formatCommandError = (entry: CommandMetadata | undefined, error: unknown): string => {
+  const prefix = entry === undefined ? PROJECT_NAME : `${PROJECT_NAME} ${commandLabel(entry)}`;
+  return `${prefix}: ${commandErrorDetail(entry, error)}\n`;
+};
 
 const printArgumentError = (output: CliIO, entry: CommandEntry, error: unknown): number => {
-  output.stderr(`${PROJECT_NAME} ${commandLabel(entry)}: ${errorMessage(error)}\n`);
+  output.stderr(formatCommandError(entry, error));
   output.stderr(`Run '${PROJECT_NAME} --help' for usage.\n`);
   return 1;
 };
 
 const printCommandError = (output: CliIO, entry: CommandEntry, error: unknown): number => {
-  output.stderr(`${PROJECT_NAME} ${commandLabel(entry)}: ${errorMessage(error)}\n`);
+  output.stderr(formatCommandError(entry, error));
   return 1;
 };
 
@@ -380,7 +399,7 @@ const runWorktreeSetupCommand = (
 ): CommandExecution<WorktreeBootstrapResult> => {
   const interactive = booleanFlagValue(context.arguments, "--interactive");
   const reportFailure = (result: WorktreeBootstrapResult): void => {
-    context.output.stderr(`${PROJECT_NAME} worktree-setup: ${result.error ?? "setup failed"}\n`);
+    context.output.stderr(formatCommandError(context.entry, result.error));
     if (interactive) context.output.stderr("Press Enter to retry or q to quit.\n");
   };
 
@@ -395,7 +414,7 @@ const runWorktreeSetupCommand = (
     mainCheckout: undefined,
     worktreePath: context.dependencies.cwd ?? process.cwd(),
   });
-  if (result.exitCode !== 0 && !interactive) reportFailure(result);
+  if (result.exitCode !== 0 && !interactive) throw result.error;
   return commandExecution(result, result.exitCode);
 };
 
@@ -428,13 +447,7 @@ const runWorktreeNewCommand = (
   context: CommandContext,
 ): CommandExecution<WorktreeCreateResult | undefined> => {
   const branch = context.dependencies.readLine(BRANCH_PROMPT).trim();
-  if (branch.length === 0) {
-    return commandExecution<WorktreeCreateResult | undefined>(
-      undefined,
-      1,
-      `${PROJECT_NAME} wt new: branch name is required\n`,
-    );
-  }
+  if (branch.length === 0) throw new Error("branch name is required");
   return worktreeCreateExecution(context, branch, true);
 };
 
@@ -466,8 +479,8 @@ const runProjectUpdateCommand = (
   return commandExecution(result, result.exitCode);
 };
 
-const formatProjectUpdateCommand = (result: ProjectUpdateResult, context: CommandContext): string =>
-  formatProjectUpdate(result, context.projectName);
+const formatProjectUpdateCommand = (result: ProjectUpdateResult): string =>
+  formatProjectUpdate(result);
 
 const runProjectGcCommand = (context: CommandContext): CommandExecution<ProjectGcResult> => {
   const result = runProjectGc({
@@ -481,8 +494,7 @@ const runProjectGcCommand = (context: CommandContext): CommandExecution<ProjectG
   return commandExecution(result, result.exitCode);
 };
 
-const formatProjectGcCommand = (result: ProjectGcResult, context: CommandContext): string =>
-  formatProjectGc(result, context.projectName);
+const formatProjectGcCommand = (result: ProjectGcResult): string => formatProjectGc(result);
 
 const runAdoptWorktreesCommand = (
   context: CommandContext,
@@ -496,10 +508,8 @@ const runAdoptWorktreesCommand = (
   return commandExecution(result, result.exitCode);
 };
 
-const formatAdoptWorktreesCommand = (
-  result: AdoptWorktreesResult,
-  context: CommandContext,
-): string => formatAdoptWorktrees(result, context.projectName);
+const formatAdoptWorktreesCommand = (result: AdoptWorktreesResult): string =>
+  formatAdoptWorktrees(result);
 
 const runProjectAddCommand = (context: CommandContext): CommandExecution<ProjectAddResult> =>
   commandExecution(
@@ -562,68 +572,96 @@ const formatSync = (_result: void): string => "";
 
 const formatWorktreeEvent = (_result: WorktreeEventResult): string => "";
 
+const failedCommandExecution = (
+  entry: CommandMetadata,
+  error: unknown,
+): FormattedCommandExecution => ({
+  exitCode: 1,
+  stdout: "",
+  stdoutRecords: undefined,
+  stderr: formatCommandError(entry, error),
+});
+
 const formatCommandExecution = <Result>(
   definition: CommandDefinition<Result>,
   context: CommandContext,
+  formatRecords: ReportRecordFormatter<Result> | undefined,
 ): FormattedCommandExecution => {
-  const execution = definition.run(context);
-  return {
-    exitCode: execution.exitCode,
-    stdout: definition.format(execution.result, context),
-    stderr: execution.stderr,
-  };
+  try {
+    const execution = definition.run(context);
+    const stdout = definition.format(execution.result, context);
+    const records = formatRecords?.(execution.result);
+    return {
+      exitCode: execution.exitCode,
+      stdout,
+      stdoutRecords: records?.map((record) => `${record}\n`),
+      stderr: "",
+    };
+  } catch (error) {
+    return failedCommandExecution(definition, error);
+  }
 };
+
+const outputRecords = (output: string): readonly string[] => (output.length === 0 ? [] : [output]);
+
+const prefixProjectOutput = (projectName: string, records: readonly string[]): string =>
+  records.map((record) => `[${projectName}] ${record}`).join("");
 
 const runAllProjects = <Result>(
   definition: CommandDefinition<Result>,
+  formatRecords: ReportRecordFormatter<Result> | undefined,
   context: CommandContext,
 ): FormattedCommandExecution => {
   const stdout: string[] = [];
   const stderr: string[] = [];
   let exitCode = 0;
-  const projects = enumerateProjects({
-    platform: context.hostConfiguration.platform,
-    homeDirectory: context.hostConfiguration.homeDirectory,
-    projectsFile: context.hostConfiguration.projectsFile,
-    systemdUserDirectory: context.hostConfiguration.systemdUserDirectory,
-  });
+  let projects: ReturnType<typeof enumerateProjects>;
+  try {
+    const enumerate = context.dependencies.enumerateProjects ?? enumerateProjects;
+    projects = enumerate({
+      platform: context.hostConfiguration.platform,
+      homeDirectory: context.hostConfiguration.homeDirectory,
+      projectsFile: context.hostConfiguration.projectsFile,
+      systemdUserDirectory: context.hostConfiguration.systemdUserDirectory,
+    });
+  } catch (error) {
+    return failedCommandExecution(definition, error);
+  }
   for (const project of projects) {
     const projectContext: CommandContext = {
       ...context,
-      projectName: project.repo,
       projectPath: project.path,
     };
-    try {
-      const execution = definition.run(projectContext);
-      stdout.push(definition.format(execution.result, projectContext));
-      if (execution.stderr.length > 0) stderr.push(execution.stderr);
-      if (execution.exitCode !== 0) exitCode = 1;
-    } catch (error) {
-      stderr.push(
-        `[${project.repo}] ${PROJECT_NAME} ${definition.tokens.join(" ")}: ${errorMessage(error)}\n`,
-      );
-      exitCode = 1;
-    }
+    const execution = formatCommandExecution(definition, projectContext, formatRecords);
+    stdout.push(
+      prefixProjectOutput(project.repo, execution.stdoutRecords ?? outputRecords(execution.stdout)),
+    );
+    stderr.push(prefixProjectOutput(project.repo, outputRecords(execution.stderr)));
+    if (execution.exitCode !== 0) exitCode = 1;
   }
-  return { exitCode, stdout: stdout.join(""), stderr: stderr.join("") };
+  return { exitCode, stdout: stdout.join(""), stdoutRecords: undefined, stderr: stderr.join("") };
 };
 
 const executeCommand = <Result>(
   definition: CommandDefinition<Result>,
+  formatRecords: ReportRecordFormatter<Result> | undefined,
   context: CommandContext,
 ): FormattedCommandExecution =>
   definition.forEachProject && booleanFlagValue(context.arguments, "--all")
-    ? runAllProjects(definition, context)
-    : formatCommandExecution(definition, context);
+    ? runAllProjects(definition, formatRecords, context)
+    : formatCommandExecution(definition, context, formatRecords);
 
-const command = <Result>(definition: CommandDefinition<Result>): CommandEntry => ({
+const command = <Result>(
+  definition: CommandDefinition<Result>,
+  formatRecords: ReportRecordFormatter<Result> | undefined = undefined,
+): CommandEntry => ({
   tokens: definition.tokens,
   positionals: definition.positionals,
   flags: definition.flags,
   forEachProject: definition.forEachProject,
   description: definition.description,
   helpLayout: definition.helpLayout,
-  execute: (context) => executeCommand(definition, context),
+  execute: (context) => executeCommand(definition, formatRecords, context),
 });
 
 const commandTable: readonly CommandEntry[] = [
@@ -719,39 +757,48 @@ const commandTable: readonly CommandEntry[] = [
     run: runPluginInstallCommand,
     format: formatPluginInstall,
   }),
-  command<ProjectUpdateResult>({
-    tokens: ["update"],
-    positionals: [],
-    flags: [booleanFlag("--all", "Refresh and rebuild every registered project")],
-    forEachProject: true,
-    description: "Refresh and rebuild project environments",
-    helpLayout: "standard",
-    run: runProjectUpdateCommand,
-    format: formatProjectUpdateCommand,
-  }),
-  command<ProjectGcResult>({
-    tokens: ["gc"],
-    positionals: [],
-    flags: [
-      booleanFlag("--all", "Review or collect worktrees in every registered project"),
-      booleanFlag("--dry-run", "Review stale worktrees without changing them"),
-    ],
-    forEachProject: true,
-    description: "Review or collect stale worktrees",
-    helpLayout: "expanded",
-    run: runProjectGcCommand,
-    format: formatProjectGcCommand,
-  }),
-  command<AdoptWorktreesResult>({
-    tokens: ["adopt-worktrees"],
-    positionals: [],
-    flags: [booleanFlag("--all", "Bootstrap every registered project's worktrees")],
-    forEachProject: true,
-    description: "Bootstrap registered worktrees",
-    helpLayout: "standard",
-    run: runAdoptWorktreesCommand,
-    format: formatAdoptWorktreesCommand,
-  }),
+  command<ProjectUpdateResult>(
+    {
+      tokens: ["update"],
+      positionals: [],
+      flags: [booleanFlag("--all", "Refresh and rebuild every registered project")],
+      forEachProject: true,
+      description: "Refresh and rebuild project environments",
+      helpLayout: "standard",
+      run: runProjectUpdateCommand,
+      format: formatProjectUpdateCommand,
+    },
+    formatProjectUpdateRecords,
+  ),
+  command<ProjectGcResult>(
+    {
+      tokens: ["gc"],
+      positionals: [],
+      flags: [
+        booleanFlag("--all", "Review or collect worktrees in every registered project"),
+        booleanFlag("--dry-run", "Review stale worktrees without changing them"),
+      ],
+      forEachProject: true,
+      description: "Review or collect stale worktrees",
+      helpLayout: "expanded",
+      run: runProjectGcCommand,
+      format: formatProjectGcCommand,
+    },
+    formatProjectGcRecords,
+  ),
+  command<AdoptWorktreesResult>(
+    {
+      tokens: ["adopt-worktrees"],
+      positionals: [],
+      flags: [booleanFlag("--all", "Bootstrap every registered project's worktrees")],
+      forEachProject: true,
+      description: "Bootstrap registered worktrees",
+      helpLayout: "standard",
+      run: runAdoptWorktreesCommand,
+      format: formatAdoptWorktreesCommand,
+    },
+    formatAdoptWorktreesRecords,
+  ),
 ];
 
 const commandUsage = (entry: CommandEntry): string => {
@@ -875,7 +922,7 @@ export const runCli = (
   try {
     hostConfiguration = resolveHostConfiguration(environment);
   } catch (error) {
-    output.stderr(`${PROJECT_NAME}: ${errorMessage(error)}\n`);
+    output.stderr(formatCommandError(undefined, error));
     return 1;
   }
   const pluginPath = resolvePluginPath(dependencies?.pluginPath, environment);
@@ -905,10 +952,10 @@ export const runCli = (
   const context: CommandContext = {
     arguments: parsedArguments,
     dependencies: resolvedDependencies,
+    entry,
     hostConfiguration,
     output,
     pluginPath,
-    projectName: undefined,
     projectPath: resolvedDependencies.cwd ?? process.cwd(),
   };
 

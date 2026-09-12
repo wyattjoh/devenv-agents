@@ -54,6 +54,7 @@ export const createCliDependencies = (
   herdrClient: createFakeHerdrClient(),
   syncReferences: () => undefined,
   bootstrap: createFakeWorktreeBootstrap(),
+  enumerateProjects: undefined,
   environment: {},
   pluginPath: undefined,
   ...overrides,
