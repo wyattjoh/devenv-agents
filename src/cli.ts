@@ -50,6 +50,23 @@ export type CliIO = {
 };
 
 /**
+ * Host values resolved from the CLI environment before dispatching a command.
+ */
+export type HostConfiguration = {
+  readonly platform: ProjectPlatform;
+  readonly homeDirectory: string;
+  readonly projectsFile: string | undefined;
+  readonly systemdUserDirectory: string | undefined;
+  readonly codeRoot: string | undefined;
+  readonly templateRoot: string;
+  readonly host: string;
+  readonly user: string;
+  readonly herdrBinPath: string | undefined;
+  readonly eventJson: string | undefined;
+  readonly workspaceId: string | undefined;
+};
+
+/**
  * The help text for the project CLI.
  */
 export const HELP_TEXT = `Usage: ${PROJECT_NAME} [options]
@@ -96,7 +113,7 @@ export type CliDependencies = {
   readonly syncReferences: SyncReferences;
   readonly bootstrap: WorktreeBootstrap;
   /**
-   * Environment snapshot used by Herdr commands, or undefined for process.env.
+   * Environment snapshot used to resolve host settings, or undefined for process.env.
    */
   readonly environment: PluginEnvironment | undefined;
   /**
@@ -124,10 +141,51 @@ const interactiveLine = (message = "Press Enter to retry or q to quit: "): strin
   return promptFunction?.(message) ?? (message === BRANCH_PROMPT ? "" : "q");
 };
 
-const defaultDependencies = (): CliDependencies => {
+const platformFrom = (platform: string | undefined): ProjectPlatform => {
+  if (platform === "linux" || platform === "darwin") return platform;
+  if (platform !== undefined) {
+    throw new Error(`PROJECT_PLATFORM must be either linux or darwin, got '${platform}'`);
+  }
+  if (process.platform === "darwin" || process.platform === "linux") return process.platform;
+  throw new Error(`Unsupported host platform '${process.platform}'`);
+};
+
+/**
+ * Resolves the process environment into the values needed by CLI commands.
+ *
+ * Platform validation and all CLI environment fallbacks live here so commands
+ * receive one stable host record instead of consulting process-global state.
+ *
+ * @param environment Environment snapshot used for resolution.
+ * @returns The typed host configuration for one CLI invocation.
+ * @throws When the configured or running host platform is unsupported.
+ */
+export const resolveHostConfiguration = (
+  environment: PluginEnvironment = process.env,
+): HostConfiguration => {
+  const roots = defaultProjectRoots();
+  return {
+    platform: platformFrom(environment.PROJECT_PLATFORM),
+    homeDirectory: environment.PROJECT_HOME ?? environment.HOME ?? roots.homeDirectory,
+    projectsFile: environment.PROJECT_PROJECTS_FILE,
+    systemdUserDirectory: environment.PROJECT_SYSTEMD_USER_DIRECTORY,
+    codeRoot: environment.PROJECT_CODE_ROOT,
+    templateRoot: environment.PROJECT_TEMPLATE_ROOT ?? roots.templateRoot,
+    host: environment.PROJECT_HOST ?? "strix",
+    user: environment.USER ?? environment.USERNAME ?? "user",
+    herdrBinPath: environment.HERDR_BIN_PATH,
+    eventJson: environment.HERDR_PLUGIN_EVENT_JSON,
+    workspaceId: environment.HERDR_WORKSPACE_ID,
+  };
+};
+
+const createDefaultDependencies = (
+  hostConfiguration: HostConfiguration,
+  environment: PluginEnvironment,
+  runner: CommandRunner,
+): CliDependencies => {
   const now = defaultNow;
-  const runner = defaultCommandRunner;
-  const herdrClient = createHerdrClient(runner, process.env.HERDR_BIN_PATH);
+  const herdrClient = createHerdrClient(runner, hostConfiguration.herdrBinPath);
   const syncReferences = createSyncReferences({ runner });
   return {
     cwd: undefined,
@@ -142,10 +200,23 @@ const defaultDependencies = (): CliDependencies => {
       runner,
       syncReferences,
     }),
-    environment: undefined,
+    environment,
     pluginPath: undefined,
   };
 };
+
+/**
+ * Creates production CLI dependencies from one environment snapshot.
+ *
+ * @param environment Environment snapshot used for host and Herdr settings.
+ * @param runner Command runner used by the default adapters.
+ * @returns A complete production dependency record.
+ */
+export const defaultDependencies = (
+  environment: PluginEnvironment = process.env,
+  runner: CommandRunner = defaultCommandRunner,
+): CliDependencies =>
+  createDefaultDependencies(resolveHostConfiguration(environment), environment, runner);
 
 const isHelpFlag = (argument: string): boolean => argument === "--help" || argument === "-h";
 
@@ -188,16 +259,17 @@ const runWorktreeSetupCommand = (
   }
 };
 
-const runWorktreeEventCommand = (dependencies: CliDependencies): number => {
-  const environment = dependencies.environment ?? process.env;
-  return runWorktreeEvent({
-    eventJson: environment.HERDR_PLUGIN_EVENT_JSON,
-    workspaceId: environment.HERDR_WORKSPACE_ID,
+const runWorktreeEventCommand = (
+  dependencies: CliDependencies,
+  hostConfiguration: HostConfiguration,
+): number =>
+  runWorktreeEvent({
+    eventJson: hostConfiguration.eventJson,
+    workspaceId: hostConfiguration.workspaceId,
     bootstrap: dependencies.bootstrap,
     herdrClient: dependencies.herdrClient,
     runner: dependencies.runner,
   }).exitCode;
-};
 
 const worktreeCreateOutput = (result: WorktreeCreateResult, json: boolean): string => {
   if (json) {
@@ -279,18 +351,10 @@ const runWorktreeNewCommand = (output: CliIO, dependencies: CliDependencies): nu
   return runWorktreeCreateCommand(output, dependencies, [branch], true);
 };
 
-const platformFrom = (platform: string | undefined): ProjectPlatform => {
-  if (platform === "linux" || platform === "darwin") return platform;
-  if (platform !== undefined) {
-    throw new Error(`PROJECT_PLATFORM must be either linux or darwin, got '${platform}'`);
-  }
-  if (process.platform === "darwin" || process.platform === "linux") return process.platform;
-  throw new Error(`Unsupported host platform '${process.platform}'`);
-};
-
 const runProjectUpdateCommand = (
   output: CliIO,
   dependencies: CliDependencies,
+  hostConfiguration: HostConfiguration,
   args: readonly string[],
 ): number => {
   let all = false;
@@ -302,7 +366,6 @@ const runProjectUpdateCommand = (
     return printUnknown(output, argument ?? "update");
   }
 
-  const environment = dependencies.environment ?? process.env;
   try {
     if (!all) {
       const result = runProjectUpdate({
@@ -313,12 +376,11 @@ const runProjectUpdateCommand = (
       return result.exitCode;
     }
 
-    const roots = defaultProjectRoots();
     const projects = enumerateProjects({
-      platform: platformFrom(environment.PROJECT_PLATFORM),
-      homeDirectory: environment.PROJECT_HOME ?? environment.HOME ?? roots.homeDirectory,
-      projectsFile: environment.PROJECT_PROJECTS_FILE,
-      systemdUserDirectory: environment.PROJECT_SYSTEMD_USER_DIRECTORY,
+      platform: hostConfiguration.platform,
+      homeDirectory: hostConfiguration.homeDirectory,
+      projectsFile: hostConfiguration.projectsFile,
+      systemdUserDirectory: hostConfiguration.systemdUserDirectory,
     });
     let exitCode = 0;
     for (const project of projects) {
@@ -343,6 +405,7 @@ const runProjectUpdateCommand = (
 const runProjectGcCommand = (
   output: CliIO,
   dependencies: CliDependencies,
+  hostConfiguration: HostConfiguration,
   args: readonly string[],
 ): number => {
   let all = false;
@@ -359,7 +422,6 @@ const runProjectGcCommand = (
     return printUnknown(output, argument ?? "gc");
   }
 
-  const environment = dependencies.environment ?? process.env;
   try {
     if (!all) {
       const result = runProjectGc({
@@ -374,12 +436,11 @@ const runProjectGcCommand = (
       return result.exitCode;
     }
 
-    const roots = defaultProjectRoots();
     const projects = enumerateProjects({
-      platform: platformFrom(environment.PROJECT_PLATFORM),
-      homeDirectory: environment.PROJECT_HOME ?? environment.HOME ?? roots.homeDirectory,
-      projectsFile: environment.PROJECT_PROJECTS_FILE,
-      systemdUserDirectory: environment.PROJECT_SYSTEMD_USER_DIRECTORY,
+      platform: hostConfiguration.platform,
+      homeDirectory: hostConfiguration.homeDirectory,
+      projectsFile: hostConfiguration.projectsFile,
+      systemdUserDirectory: hostConfiguration.systemdUserDirectory,
     });
     let exitCode = 0;
     for (const project of projects) {
@@ -411,6 +472,7 @@ const runProjectGcCommand = (
 const runAdoptWorktreesCommand = (
   output: CliIO,
   dependencies: CliDependencies,
+  hostConfiguration: HostConfiguration,
   args: readonly string[],
 ): number => {
   let all = false;
@@ -422,7 +484,6 @@ const runAdoptWorktreesCommand = (
     return printUnknown(output, argument ?? "adopt-worktrees");
   }
 
-  const environment = dependencies.environment ?? process.env;
   try {
     if (!all) {
       const result = runAdoptWorktrees({
@@ -435,12 +496,11 @@ const runAdoptWorktreesCommand = (
       return result.exitCode;
     }
 
-    const roots = defaultProjectRoots();
     const projects = enumerateProjects({
-      platform: platformFrom(environment.PROJECT_PLATFORM),
-      homeDirectory: environment.PROJECT_HOME ?? environment.HOME ?? roots.homeDirectory,
-      projectsFile: environment.PROJECT_PROJECTS_FILE,
-      systemdUserDirectory: environment.PROJECT_SYSTEMD_USER_DIRECTORY,
+      platform: hostConfiguration.platform,
+      homeDirectory: hostConfiguration.homeDirectory,
+      projectsFile: hostConfiguration.projectsFile,
+      systemdUserDirectory: hostConfiguration.systemdUserDirectory,
     });
     let exitCode = 0;
     for (const project of projects) {
@@ -470,6 +530,7 @@ const runAdoptWorktreesCommand = (
 const runProjectAddCommand = (
   output: CliIO,
   dependencies: CliDependencies,
+  hostConfiguration: HostConfiguration,
   args: readonly string[],
 ): number => {
   let repository: string | undefined;
@@ -513,22 +574,19 @@ const runProjectAddCommand = (
     return 1;
   }
 
-  const environment = dependencies.environment ?? process.env;
-  const roots = defaultProjectRoots();
-  const homeDirectory = environment.PROJECT_HOME ?? environment.HOME ?? roots.homeDirectory;
   try {
     const result = runProjectAdd({
       repository,
       from,
       local,
-      platform: platformFrom(environment.PROJECT_PLATFORM),
-      homeDirectory,
-      codeRoot: environment.PROJECT_CODE_ROOT,
-      projectsFile: environment.PROJECT_PROJECTS_FILE,
-      systemdUserDirectory: environment.PROJECT_SYSTEMD_USER_DIRECTORY,
-      templateRoot: environment.PROJECT_TEMPLATE_ROOT ?? roots.templateRoot,
-      host: host ?? environment.PROJECT_HOST ?? "strix",
-      user: environment.USER ?? environment.USERNAME ?? "user",
+      platform: hostConfiguration.platform,
+      homeDirectory: hostConfiguration.homeDirectory,
+      codeRoot: hostConfiguration.codeRoot,
+      projectsFile: hostConfiguration.projectsFile,
+      systemdUserDirectory: hostConfiguration.systemdUserDirectory,
+      templateRoot: hostConfiguration.templateRoot,
+      host: host ?? hostConfiguration.host,
+      user: hostConfiguration.user,
       herdrClient: dependencies.herdrClient,
       runner: dependencies.runner,
       syncReferences: dependencies.syncReferences,
@@ -557,12 +615,15 @@ const runSyncCommand = (output: CliIO, dependencies: CliDependencies): number =>
   }
 };
 
-const runPluginInstallCommand = (output: CliIO, dependencies: CliDependencies): number => {
-  const environment = dependencies.environment ?? process.env;
+const runPluginInstallCommand = (
+  output: CliIO,
+  dependencies: CliDependencies,
+  pluginPath: string,
+): number => {
   try {
     const result = runPluginInstall({
       herdrClient: dependencies.herdrClient,
-      pluginPath: resolvePluginPath(dependencies.pluginPath, environment),
+      pluginPath,
     });
     if (result.action !== "unchanged") {
       output.stdout(`${PROJECT_PLUGIN_ID}: ${result.action}\n`);
@@ -589,6 +650,15 @@ export const runCli = (
   dependencies: CliDependencies | undefined = undefined,
 ): number => {
   const output = io ?? processIO;
+  const environment = dependencies?.environment ?? process.env;
+  let hostConfiguration: HostConfiguration;
+  try {
+    hostConfiguration = resolveHostConfiguration(environment);
+  } catch (error) {
+    output.stderr(`${PROJECT_NAME}: ${errorMessage(error)}\n`);
+    return 1;
+  }
+  const pluginPath = resolvePluginPath(dependencies?.pluginPath, environment);
 
   if (args.length === 0 || args.some(isHelpFlag)) {
     output.stdout(HELP_TEXT);
@@ -601,21 +671,22 @@ export const runCli = (
   }
 
   const command = args[0] ?? "";
-  const resolvedDependencies = dependencies ?? defaultDependencies();
+  const resolvedDependencies =
+    dependencies ?? createDefaultDependencies(hostConfiguration, environment, defaultCommandRunner);
   if (command === "add") {
-    return runProjectAddCommand(output, resolvedDependencies, args.slice(1));
+    return runProjectAddCommand(output, resolvedDependencies, hostConfiguration, args.slice(1));
   }
 
   if (command === "update") {
-    return runProjectUpdateCommand(output, resolvedDependencies, args.slice(1));
+    return runProjectUpdateCommand(output, resolvedDependencies, hostConfiguration, args.slice(1));
   }
 
   if (command === "gc") {
-    return runProjectGcCommand(output, resolvedDependencies, args.slice(1));
+    return runProjectGcCommand(output, resolvedDependencies, hostConfiguration, args.slice(1));
   }
 
   if (command === "adopt-worktrees") {
-    return runAdoptWorktreesCommand(output, resolvedDependencies, args.slice(1));
+    return runAdoptWorktreesCommand(output, resolvedDependencies, hostConfiguration, args.slice(1));
   }
 
   if (command === "worktree-setup") {
@@ -645,12 +716,12 @@ export const runCli = (
 
   if (command === "wt" && args[1] === "on-event") {
     if (args.length !== 2) return printUnknown(output, args[2] ?? command);
-    return runWorktreeEventCommand(resolvedDependencies);
+    return runWorktreeEventCommand(resolvedDependencies, hostConfiguration);
   }
 
   if (command === "plugin" && args[1] === "install") {
     if (args.length !== 2) return printUnknown(output, args[2] ?? command);
-    return runPluginInstallCommand(output, resolvedDependencies);
+    return runPluginInstallCommand(output, resolvedDependencies, pluginPath);
   }
 
   return printUnknown(output, command);

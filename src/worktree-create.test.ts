@@ -1,13 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { runCli, type CliDependencies } from "./cli.ts";
-import {
-  createRecordingRunner,
-  type CommandResult,
-  type RecordingRunner,
-} from "./command-runner.ts";
+import { runCli } from "./cli.ts";
+import { createRecordingRunner, type CommandResult } from "./command-runner.ts";
 import type { HerdrPlugin } from "./herdr-client.ts";
+import { captureOutput, createCliDependencies } from "./testing/cli.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
 import { PROJECT_PLUGIN_ID } from "./worktree-plugin.ts";
@@ -46,23 +43,6 @@ const makeProject = (
 const gitKey = (cwd: string): string =>
   `git -C ${cwd} rev-parse --path-format=absolute --git-common-dir`;
 
-const dependencies = (
-  cwd: string,
-  runner: RecordingRunner,
-  overrides: Partial<Pick<CliDependencies, "bootstrap" | "herdrClient" | "readLine">> = {},
-): CliDependencies => ({
-  cwd,
-  now: () => "2026-09-08T01:00:00.000Z",
-  readLine: () => "q",
-  runner,
-  bootstrap: createFakeWorktreeBootstrap(),
-  herdrClient: createFakeHerdrClient(),
-  syncReferences: () => undefined,
-  environment: {},
-  pluginPath: undefined,
-  ...overrides,
-});
-
 afterEach(() => {
   for (const path of created.splice(0)) rmSync(path, { recursive: true, force: true });
 });
@@ -72,17 +52,17 @@ describe("worktree creation", () => {
     const { mainCheckout } = makeProject("feature");
     const runner = createRecordingRunner();
     const herdrClient = createFakeHerdrClient({ listPlugins: () => [] });
-    const output = { stdout: "", stderr: "" };
-    const io = {
-      stdout: (text: string) => (output.stdout += text),
-      stderr: (text: string) => (output.stderr += text),
-    };
+    const output = captureOutput();
 
     expect(
-      runCli(["wt", "create", "feature"], io, dependencies(mainCheckout, runner, { herdrClient })),
+      runCli(
+        ["wt", "create", "feature"],
+        output.io,
+        createCliDependencies({ cwd: mainCheckout, runner, herdrClient }),
+      ),
     ).toBe(1);
-    expect(output.stdout).toBe("");
-    expect(output.stderr).toBe(
+    expect(output.stdout()).toBe("");
+    expect(output.stderr()).toBe(
       "project wt create: Herdr plugin wyattjoh.project-worktrees is not linked and enabled; run 'project plugin install' first\n",
     );
     expect(runner.calls).toEqual([]);
@@ -111,25 +91,21 @@ describe("worktree creation", () => {
     const runner = createRecordingRunner({
       [gitKey(mainCheckout)]: result(0, `${mainCheckout}/.git\n`),
     });
-    const output = { stdout: "", stderr: "" };
-    const io = {
-      stdout: (text: string) => (output.stdout += text),
-      stderr: (text: string) => (output.stderr += text),
-    };
+    const output = captureOutput();
 
     expect(
       runCli(
         ["wt", "create", branch, "--base", "main", "--no-focus", "--json"],
-        io,
-        dependencies(mainCheckout, runner, { bootstrap, herdrClient }),
+        output.io,
+        createCliDependencies({ cwd: mainCheckout, runner, bootstrap, herdrClient }),
       ),
     ).toBe(0);
-    expect(JSON.parse(output.stdout)).toEqual({
+    expect(JSON.parse(output.stdout())).toEqual({
       workspace_id: "w3",
       root_pane_id: "w3:p1",
     });
-    expect(output.stdout.endsWith("\n")).toBe(true);
-    expect(output.stderr).toBe("");
+    expect(output.stdout().endsWith("\n")).toBe(true);
+    expect(output.stderr()).toBe("");
     expect(awaited).toEqual([`${mainCheckout}:${realpathSync(worktreePath)}`]);
     expect(deadlines).toEqual([Date.parse("2026-09-08T01:00:00.000Z") + 5 * 60 * 1000]);
     expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
@@ -156,21 +132,17 @@ describe("worktree creation", () => {
     const runner = createRecordingRunner({
       [gitKey(mainCheckout)]: result(0, `${mainCheckout}/.git\n`),
     });
-    const output = { stdout: "", stderr: "" };
-    const io = {
-      stdout: (text: string) => (output.stdout += text),
-      stderr: (text: string) => (output.stderr += text),
-    };
+    const output = captureOutput();
 
     expect(
       runCli(
         ["wt", "create", branch],
-        io,
-        dependencies(mainCheckout, runner, { bootstrap, herdrClient }),
+        output.io,
+        createCliDependencies({ cwd: mainCheckout, runner, bootstrap, herdrClient }),
       ),
     ).toBe(1);
-    expect(output.stdout).toBe("");
-    expect(output.stderr).toContain("project wt create: devenv shell -- true");
+    expect(output.stdout()).toBe("");
+    expect(output.stderr()).toContain("project wt create: devenv shell -- true");
   });
 
   it("reports a bootstrap timeout as a distinct non-zero outcome", () => {
@@ -189,21 +161,17 @@ describe("worktree creation", () => {
     const runner = createRecordingRunner({
       [gitKey(mainCheckout)]: result(0, `${mainCheckout}/.git\n`),
     });
-    const output = { stdout: "", stderr: "" };
-    const io = {
-      stdout: (text: string) => (output.stdout += text),
-      stderr: (text: string) => (output.stderr += text),
-    };
+    const output = captureOutput();
 
     expect(
       runCli(
         ["wt", "create", branch],
-        io,
-        dependencies(mainCheckout, runner, { bootstrap, herdrClient }),
+        output.io,
+        createCliDependencies({ cwd: mainCheckout, runner, bootstrap, herdrClient }),
       ),
     ).toBe(1);
-    expect(output.stdout).toBe("");
-    expect(output.stderr).toBe("project wt create: worktree bootstrap timed out\n");
+    expect(output.stdout()).toBe("");
+    expect(output.stderr()).toBe("project wt create: worktree bootstrap timed out\n");
   });
 
   it("prompts for a branch and creates a focused worktree", () => {
@@ -220,17 +188,15 @@ describe("worktree creation", () => {
     const runner = createRecordingRunner({
       [gitKey(mainCheckout)]: result(0, `${mainCheckout}/.git\n`),
     });
-    const output = { stdout: "", stderr: "" };
-    const io = {
-      stdout: (text: string) => (output.stdout += text),
-      stderr: (text: string) => (output.stderr += text),
-    };
+    const output = captureOutput();
 
     expect(
       runCli(
         ["wt", "new"],
-        io,
-        dependencies(mainCheckout, runner, {
+        output.io,
+        createCliDependencies({
+          cwd: mainCheckout,
+          runner,
           herdrClient,
           readLine: (message) => {
             prompts.push(message);
@@ -240,8 +206,8 @@ describe("worktree creation", () => {
       ),
     ).toBe(0);
     expect(prompts).toEqual(["Branch name: "]);
-    expect(output.stdout).toBe("Workspace ID: w3\nRoot pane ID: w3:p1\n");
-    expect(output.stderr).toBe("");
+    expect(output.stdout()).toBe("Workspace ID: w3\nRoot pane ID: w3:p1\n");
+    expect(output.stderr()).toBe("");
     expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
       ["git", "-C", mainCheckout, "rev-parse", "--path-format=absolute", "--git-common-dir"],
     ]);
@@ -251,14 +217,14 @@ describe("worktree creation", () => {
     const { mainCheckout } = makeProject("feature");
     const runner = createRecordingRunner();
     const herdrClient = createFakeHerdrClient({ listPlugins: () => [projectPlugin(false)] });
-    const output = { stdout: "", stderr: "" };
-    const io = {
-      stdout: (text: string) => (output.stdout += text),
-      stderr: (text: string) => (output.stderr += text),
-    };
+    const output = captureOutput();
 
     expect(
-      runCli(["wt", "create", "feature"], io, dependencies(mainCheckout, runner, { herdrClient })),
+      runCli(
+        ["wt", "create", "feature"],
+        output.io,
+        createCliDependencies({ cwd: mainCheckout, runner, herdrClient }),
+      ),
     ).toBe(1);
     expect(runner.calls).toEqual([]);
   });

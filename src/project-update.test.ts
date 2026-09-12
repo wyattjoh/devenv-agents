@@ -7,9 +7,8 @@ import {
   type CommandInvocation,
   type CommandResult,
 } from "./command-runner.ts";
-import { runCli, type CliDependencies } from "./cli.ts";
-import { createFakeHerdrClient } from "./testing/herdr-client.ts";
-import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
+import { runCli } from "./cli.ts";
+import { captureOutput, createCliDependencies } from "./testing/cli.ts";
 import { writeProjectsFile, type ProjectRegistration } from "./project-add.ts";
 import { formatProjectUpdate, runProjectUpdate } from "./project-update.ts";
 import { createGitFixture } from "./testing/git-fixture.ts";
@@ -38,30 +37,6 @@ const createFixture = (prefix: string) =>
 
 const listedWorktreePaths = (repository: string): readonly string[] =>
   listLinkedWorktrees(repository, realCommandRunner).map((worktree) => worktree.path);
-
-const captureOutput = (): {
-  readonly stdout: () => string;
-  readonly stderr: () => string;
-  readonly io: {
-    readonly stdout: (text: string) => void;
-    readonly stderr: (text: string) => void;
-  };
-} => {
-  let stdout = "";
-  let stderr = "";
-  return {
-    stdout: () => stdout,
-    stderr: () => stderr,
-    io: {
-      stdout: (text) => {
-        stdout += text;
-      },
-      stderr: (text) => {
-        stderr += text;
-      },
-    },
-  };
-};
 
 afterEach(() => {
   for (const path of created.splice(0)) rmSync(path, { recursive: true, force: true });
@@ -229,17 +204,10 @@ describe("project update", () => {
       "devenv shell -- true": [result(0), result(1, "", "worktree build failed")],
     });
     const output = captureOutput();
-    const dependencies: CliDependencies = {
+    const dependencies = createCliDependencies({
       cwd: fixture.repository,
-      now: () => "2026-09-08T01:00:00.000Z",
-      readLine: () => "q",
       runner,
-      bootstrap: createFakeWorktreeBootstrap(),
-      herdrClient: createFakeHerdrClient(),
-      syncReferences: () => undefined,
-      environment: {},
-      pluginPath: undefined,
-    };
+    });
 
     expect(runCli(["update"], output.io, dependencies)).toBe(1);
     expect(output.stderr()).toBe("");
@@ -272,21 +240,14 @@ describe("project update", () => {
       "devenv shell -- true": result(0),
     });
     const output = captureOutput();
-    const dependencies: CliDependencies = {
-      cwd: undefined,
-      now: () => "2026-09-08T01:00:00.000Z",
-      readLine: () => "q",
+    const dependencies = createCliDependencies({
       runner,
-      bootstrap: createFakeWorktreeBootstrap(),
-      herdrClient: createFakeHerdrClient(),
-      syncReferences: () => undefined,
       environment: {
         PROJECT_PLATFORM: "darwin",
         PROJECT_HOME: registryRoot,
         PROJECT_PROJECTS_FILE: projectsFile,
       },
-      pluginPath: undefined,
-    };
+    });
 
     expect(runCli(["update", "--all"], output.io, dependencies)).toBe(0);
     expect(output.stderr()).toBe("");

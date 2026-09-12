@@ -17,7 +17,8 @@ import {
 } from "./command-runner.ts";
 import type { HerdrClient, HerdrWorktree } from "./herdr-client.ts";
 import type { WorktreeBootstrap, WorktreeBootstrapInspection } from "./worktree-bootstrap.ts";
-import { runCli, type CliDependencies } from "./cli.ts";
+import { runCli } from "./cli.ts";
+import { captureOutput, createCliDependencies } from "./testing/cli.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
 import {
@@ -217,30 +218,6 @@ const gcBootstrap = (
     },
     forget: ({ worktreePath }) => forgotten.push(worktreePath),
   });
-
-const captureOutput = (): {
-  readonly stdout: () => string;
-  readonly stderr: () => string;
-  readonly io: {
-    readonly stdout: (text: string) => void;
-    readonly stderr: (text: string) => void;
-  };
-} => {
-  let stdout = "";
-  let stderr = "";
-  return {
-    stdout: () => stdout,
-    stderr: () => stderr,
-    io: {
-      stdout: (text) => {
-        stdout += text;
-      },
-      stderr: (text) => {
-        stderr += text;
-      },
-    },
-  };
-};
 
 afterEach(() => {
   for (const path of created.splice(0)) rmSync(path, { recursive: true, force: true });
@@ -571,17 +548,12 @@ describe("adopt-worktrees", () => {
     const project = makeProject();
     const runner = gcRunner(project);
     const output = captureOutput();
-    const dependencies: CliDependencies = {
+    const dependencies = createCliDependencies({
       cwd: project.main,
-      now: () => "2026-09-08T01:00:00.000Z",
-      readLine: () => "q",
       runner,
-      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient: gcClient(project),
-      syncReferences: () => undefined,
       environment: { PROJECT_PLATFORM: "linux" },
-      pluginPath: undefined,
-    };
+    });
 
     expect(runCli(["gc", "--dry-run"], output.io, dependencies)).toBe(0);
     expect(output.stderr()).toBe("");
@@ -624,17 +596,12 @@ describe("adopt-worktrees", () => {
       openWorktree: ({ cwd }) => openedCwds.push(cwd),
     });
     const runner = createRecordingRunner({ git: runFixtureGit });
-    const dependencies: CliDependencies = {
+    const dependencies = createCliDependencies({
       cwd: projects[0]?.main,
-      now: () => "2026-09-08T01:00:00.000Z",
-      readLine: () => "q",
       runner,
-      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient,
-      syncReferences: () => undefined,
       environment: { PROJECT_PLATFORM: "darwin", PROJECT_PROJECTS_FILE: projectsFile },
-      pluginPath: undefined,
-    };
+    });
 
     const gcOutput = captureOutput();
     expect(runCli(["gc", "--all"], gcOutput.io, dependencies)).toBe(0);

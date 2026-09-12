@@ -1,15 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  HELP_TEXT,
-  PROJECT_NAME,
-  PROJECT_VERSION,
-  runCli,
-  type CliDependencies,
-  type CliIO,
-} from "./cli.ts";
+import { HELP_TEXT, PROJECT_NAME, PROJECT_VERSION, runCli } from "./cli.ts";
 import { createRecordingRunner, type CommandResult } from "./command-runner.ts";
+import { captureOutput, createCliDependencies } from "./testing/cli.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
 import { createWorktreeBootstrap } from "./worktree-bootstrap.ts";
@@ -26,29 +20,6 @@ const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
 afterEach(() => {
   for (const path of created.splice(0)) rmSync(path, { recursive: true, force: true });
 });
-
-type CapturedOutput = {
-  readonly io: CliIO;
-  readonly stdout: () => string;
-  readonly stderr: () => string;
-};
-
-const captureOutput = (): CapturedOutput => {
-  let stdout = "";
-  let stderr = "";
-  return {
-    io: {
-      stdout: (text) => {
-        stdout += text;
-      },
-      stderr: (text) => {
-        stderr += text;
-      },
-    },
-    stdout: () => stdout,
-    stderr: () => stderr,
-  };
-};
 
 describe("project CLI", () => {
   it("prints its version from the source entrypoint", () => {
@@ -84,6 +55,39 @@ describe("project CLI", () => {
     );
   });
 
+  it("rejects an invalid platform before dispatching any command", () => {
+    const commands = [
+      ["add", "github.com/example/widget"],
+      ["update"],
+      ["gc"],
+      ["adopt-worktrees"],
+      ["worktree-setup"],
+      ["wt", "create", "feature"],
+      ["wt", "new"],
+      ["sync"],
+      ["wt", "on-event"],
+      ["plugin", "install"],
+      ["--help"],
+      ["--version"],
+    ] as const;
+
+    for (const command of commands) {
+      const output = captureOutput();
+      const runner = createRecordingRunner();
+      const dependencies = createCliDependencies({
+        runner,
+        environment: { PROJECT_PLATFORM: "freebsd" },
+      });
+
+      expect(runCli(command, output.io, dependencies)).toBe(1);
+      expect(output.stdout()).toBe("");
+      expect(output.stderr()).toBe(
+        "project: PROJECT_PLATFORM must be either linux or darwin, got 'freebsd'\n",
+      );
+      expect(runner.calls).toEqual([]);
+    }
+  });
+
   it("runs worktree setup through the injected runner", () => {
     const root = mkdtempSync(join("/tmp", "devenv-agents-cli-"));
     const mainCheckout = join(root, "main");
@@ -101,10 +105,8 @@ describe("project CLI", () => {
       ),
       devenv: result(0),
     });
-    const dependencies: CliDependencies = {
+    const dependencies = createCliDependencies({
       cwd: worktreePath,
-      now: () => "2026-09-08T01:00:00.000Z",
-      readLine: () => "q",
       runner,
       bootstrap: createWorktreeBootstrap({
         herdrClient: createFakeHerdrClient(),
@@ -112,11 +114,7 @@ describe("project CLI", () => {
         runner,
         syncReferences: () => undefined,
       }),
-      herdrClient: createFakeHerdrClient(),
-      syncReferences: () => undefined,
-      environment: undefined,
-      pluginPath: undefined,
-    };
+    });
     const output = captureOutput();
 
     expect(runCli(["worktree-setup"], output.io, dependencies)).toBe(0);
@@ -145,17 +143,10 @@ describe("project CLI", () => {
         return { exitCode: 0, state: "done", error: undefined };
       },
     });
-    const dependencies: CliDependencies = {
+    const dependencies = createCliDependencies({
       cwd: "/tmp/fixture-worktree",
-      now: () => "2026-09-08T01:00:00.000Z",
-      readLine: () => "q",
-      runner: createRecordingRunner(),
       bootstrap,
-      herdrClient: createFakeHerdrClient(),
-      syncReferences: () => undefined,
-      environment: undefined,
-      pluginPath: undefined,
-    };
+    });
     const output = captureOutput();
 
     expect(runCli(["worktree-setup", "--interactive"], output.io, dependencies)).toBe(0);
@@ -186,19 +177,14 @@ describe("project CLI", () => {
       [`git -C ${realpathSync(worktreePath)} rev-parse --path-format=absolute --git-common-dir`]:
         result(0, `${mainCheckout}/.git\n`),
     });
-    const dependencies: CliDependencies = {
+    const dependencies = createCliDependencies({
       cwd: worktreePath,
-      now: () => "2026-09-08T01:00:00.000Z",
-      readLine: () => "q",
       runner,
       bootstrap,
-      herdrClient: createFakeHerdrClient(),
-      syncReferences: () => undefined,
       environment: {
         HERDR_PLUGIN_EVENT_JSON: JSON.stringify({ worktree: { path: worktreePath } }),
       },
-      pluginPath: undefined,
-    };
+    });
     const output = captureOutput();
 
     expect(runCli(["wt", "on-event"], output.io, dependencies)).toBe(0);
@@ -230,21 +216,15 @@ describe("project CLI", () => {
       ),
     });
     const output = captureOutput();
-    const dependencies: CliDependencies = {
+    const dependencies = createCliDependencies({
       cwd: worktreePath,
-      now: () => "2026-09-08T01:00:00.000Z",
-      readLine: () => "q",
       runner,
-      bootstrap: createFakeWorktreeBootstrap(),
-      herdrClient: createFakeHerdrClient(),
       syncReferences: createSyncReferences({
         codeRoot: join(home, "code"),
         platform: "linux",
         runner,
       }),
-      environment: undefined,
-      pluginPath: undefined,
-    };
+    });
 
     expect(runCli(["sync"], output.io, dependencies)).toBe(0);
     expect(output.stdout()).toBe("");
@@ -257,17 +237,13 @@ describe("project CLI", () => {
   it("dispatches plugin install through the injected Herdr client", () => {
     const runner = createRecordingRunner();
     const herdrClient = createFakeHerdrClient({ listPlugins: () => [] });
-    const dependencies: CliDependencies = {
-      cwd: undefined,
-      now: () => "2026-09-08T01:00:00.000Z",
-      readLine: () => "q",
+    const dependencies = createCliDependencies({
       runner,
-      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient,
-      syncReferences: () => undefined,
-      environment: {},
-      pluginPath: new URL("../plugin", import.meta.url).pathname,
-    };
+      environment: {
+        DEVENV_AGENTS_PLUGIN_PATH: new URL("../plugin", import.meta.url).pathname,
+      },
+    });
     const output = captureOutput();
 
     expect(runCli(["plugin", "install"], output.io, dependencies)).toBe(0);

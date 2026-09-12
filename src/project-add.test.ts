@@ -15,10 +15,10 @@ import {
   type CommandResult,
   type RecordingRunner,
 } from "./command-runner.ts";
-import { runCli, type CliDependencies, type CliIO } from "./cli.ts";
+import { runCli } from "./cli.ts";
 import type { HerdrPlugin } from "./herdr-client.ts";
+import { captureOutput, createCliDependencies } from "./testing/cli.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
-import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
 import {
   enumerateProjects,
   parseProjectRepository,
@@ -71,27 +71,6 @@ const makeFixture = (): Fixture => {
   mkdirSync(fixture.code, { recursive: true });
   created.push(root);
   return fixture;
-};
-
-const captureOutput = (): {
-  readonly io: CliIO;
-  readonly stdout: () => string;
-  readonly stderr: () => string;
-} => {
-  let stdout = "";
-  let stderr = "";
-  return {
-    io: {
-      stdout: (text) => {
-        stdout += text;
-      },
-      stderr: (text) => {
-        stderr += text;
-      },
-    },
-    stdout: () => stdout,
-    stderr: () => stderr,
-  };
 };
 
 const options = (
@@ -252,14 +231,9 @@ describe("project add", () => {
     writeFileSync(join(checkout, "devenv.nix"), "{ ... }: {}\n");
     const runner = createRecordingRunner({ devenv: result(0) });
     const output = captureOutput();
-    const dependencies: CliDependencies = {
-      cwd: undefined,
-      now: () => "2026-09-08T01:00:00.000Z",
-      readLine: () => "q",
+    const dependencies = createCliDependencies({
       runner,
-      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient: enabledHerdrClient(),
-      syncReferences: () => undefined,
       environment: {
         PROJECT_CODE_ROOT: fixture.code,
         PROJECT_PLATFORM: "darwin",
@@ -268,8 +242,7 @@ describe("project add", () => {
         PROJECT_HOME: fixture.home,
         USER: "fixture",
       },
-      pluginPath: undefined,
-    };
+    });
 
     expect(runCli(["add", "github.com/example/widget", "--local"], output.io, dependencies)).toBe(
       0,
@@ -292,14 +265,9 @@ describe("project add", () => {
       systemctl: result(0),
     });
     const output = captureOutput();
-    const dependencies: CliDependencies = {
-      cwd: undefined,
-      now: () => "2026-09-08T01:00:00.000Z",
-      readLine: () => "q",
+    const dependencies = createCliDependencies({
       runner,
-      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient: enabledHerdrClient(),
-      syncReferences: () => undefined,
       environment: {
         PROJECT_CODE_ROOT: fixture.code,
         PROJECT_PLATFORM: "linux",
@@ -309,8 +277,7 @@ describe("project add", () => {
         PROJECT_HOME: fixture.home,
         USER: "fixture",
       },
-      pluginPath: undefined,
-    };
+    });
 
     expect(runCli(["add", "github.com/example/widget"], output.io, dependencies)).toBe(0);
     expect(existsSync(join(fixture.systemd, "herdr@widget.service.d", "project.conf"))).toBe(true);
@@ -321,17 +288,10 @@ describe("project add", () => {
     const fixture = makeFixture();
     const runner = createRecordingRunner();
     const output = captureOutput();
-    const dependencies: CliDependencies = {
-      cwd: undefined,
-      now: () => "2026-09-08T01:00:00.000Z",
-      readLine: () => "q",
+    const dependencies = createCliDependencies({
       runner,
-      bootstrap: createFakeWorktreeBootstrap(),
-      herdrClient: createFakeHerdrClient(),
-      syncReferences: () => undefined,
       environment: { PROJECT_PLATFORM: "freebsd", PROJECT_HOME: fixture.home },
-      pluginPath: undefined,
-    };
+    });
 
     expect(runCli(["add", "github.com/example/widget"], output.io, dependencies)).toBe(1);
     expect(output.stderr()).toContain("PROJECT_PLATFORM must be either linux or darwin");

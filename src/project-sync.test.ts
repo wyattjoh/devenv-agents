@@ -17,9 +17,8 @@ import {
   realCommandRunner,
   type CommandResult,
 } from "./command-runner.ts";
-import { runCli, type CliDependencies } from "./cli.ts";
-import { createFakeHerdrClient } from "./testing/herdr-client.ts";
-import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
+import { runCli } from "./cli.ts";
+import { captureOutput, createCliDependencies } from "./testing/cli.ts";
 import { readProjectDeclaration, type ProjectDeclaration } from "./project-declaration.ts";
 import {
   createSyncReferences,
@@ -417,26 +416,16 @@ describe("project reference synchronization", () => {
             "\n",
           ),
         );
-        const output = { stdout: "", stderr: "" };
-        const io = {
-          stdout: (text: string) => (output.stdout += text),
-          stderr: (text: string) => (output.stderr += text),
-        };
-        const dependencies: CliDependencies = {
+        const output = captureOutput();
+        const dependencies = createCliDependencies({
           cwd: fixture.worktree,
-          now: () => "2026-09-08T01:00:00.000Z",
-          readLine: () => "q",
           runner: realCommandRunner,
-          bootstrap: createFakeWorktreeBootstrap(),
-          herdrClient: createFakeHerdrClient(),
           syncReferences: createSyncReferences({ codeRoot, runner: realCommandRunner }),
-          environment: {},
-          pluginPath: undefined,
-        };
+        });
 
-        expect(runCli(["sync"], io, dependencies)).toBe(0);
-        expect(output.stdout).toBe("");
-        expect(output.stderr).toBe("");
+        expect(runCli(["sync"], output.io, dependencies)).toBe(0);
+        expect(output.stdout()).toBe("");
+        expect(output.stderr()).toBe("");
         expect(
           JSON.parse(
             readFileSync(join(fixture.worktree, ".claude", "settings.local.json"), "utf8"),
