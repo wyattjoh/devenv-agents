@@ -164,15 +164,6 @@ export const getManagedWorktreeRoot = (mainCheckout: string): string =>
   join(canonicalPath(mainCheckout), ".claude", "worktrees");
 
 /**
- * Returns the shared bootstrap-status root for a project.
- *
- * @param mainCheckout Main checkout containing the shared `.devenv` state.
- * @returns The `.devenv/state/project/worktrees` path below the canonical main checkout.
- */
-export const getWorktreeStatusRoot = (mainCheckout: string): string =>
-  join(canonicalPath(mainCheckout), ".devenv", "state", "project", "worktrees");
-
-/**
  * Derives the managed worktree label from a branch name.
  *
  * @param branch Branch name, with slash-separated segments.

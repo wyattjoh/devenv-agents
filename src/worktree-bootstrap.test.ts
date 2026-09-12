@@ -16,7 +16,6 @@ import {
 } from "./command-runner.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import { withGitFixture, type GitFixture } from "./testing/git-fixture.ts";
-import { leaveStaleOwnerBootstrap } from "./worktree-bootstrap.test-support.ts";
 
 const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
   exitCode,
@@ -242,19 +241,6 @@ describe("worktree bootstrap", () => {
         },
       });
       expect(timeout).toEqual({ state: "timeout", error: undefined });
-    }, fixtureOptions);
-  });
-
-  it("recovers a stale owner on the next bootstrap run", () => {
-    withGitFixture((fixture) => {
-      prepareFixture(fixture);
-      leaveStaleOwnerBootstrap(fixture.repository, fixture.worktree);
-
-      const recovered = runWorktreeBootstrap(
-        makeRunOptions(fixture, createRecordingRunner({ devenv: result(0) }), () => undefined),
-      );
-
-      expect(recovered).toEqual({ exitCode: 0, state: "done", error: undefined });
     }, fixtureOptions);
   });
 

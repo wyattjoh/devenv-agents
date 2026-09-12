@@ -1,13 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
@@ -17,14 +9,13 @@ import {
 } from "./command-runner.ts";
 import type { HerdrPlugin } from "./herdr-client.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
+import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
 import {
   PROJECT_PLUGIN_ID,
   runPluginInstall,
   runWorktreeEvent,
   type WorktreeEventOptions,
 } from "./worktree-plugin.ts";
-import { getWorktreeStatusPaths, readWorktreeStatus } from "./worktree-status.ts";
-import { runWorktreeSetup } from "./worktree-setup.ts";
 
 const created: string[] = [];
 const pluginRoot = fileURLToPath(new URL("../plugin", import.meta.url));
@@ -74,13 +65,13 @@ const gitResponse = (mainCheckout: string, worktreePath: string): [string, Comma
 const eventOptions = (
   runner: RecordingRunner,
   eventJson: string,
-  now = (): string => "2026-09-08T01:00:00.000Z",
   herdrClient = createFakeHerdrClient(),
+  bootstrap = createFakeWorktreeBootstrap(),
 ): WorktreeEventOptions => ({
   eventJson,
   workspaceId: undefined,
+  bootstrap,
   herdrClient,
-  now,
   runner,
 });
 
@@ -128,10 +119,21 @@ describe("worktree plugin event hook", () => {
   it("opens one unfocused setup overlay and hands its claim to setup", () => {
     const { mainCheckout, worktreePath } = makeProject();
     const [gitKey, gitResult] = gitResponse(mainCheckout, worktreePath);
-    const openedPaths: string[] = [];
-    const herdrClient = createFakeHerdrClient({
-      openPluginPane: ({ cwd }) => openedPaths.push(cwd),
+    const requestedPaths: string[] = [];
+    let requestCount = 0;
+    const bootstrap = createFakeWorktreeBootstrap({
+      request: ({ worktreePath: requestedPath }) => {
+        requestedPaths.push(requestedPath);
+        requestCount += 1;
+        return {
+          state: "running",
+          claimed: requestCount === 1,
+          opened: requestCount === 1,
+          error: undefined,
+        };
+      },
     });
+    const herdrClient = createFakeHerdrClient();
     const runner = createRecordingRunner({
       [gitKey]: gitResult,
       "devenv shell -- true": result(0),
@@ -141,16 +143,15 @@ describe("worktree plugin event hook", () => {
     };
     eventPayload.worktree.path = worktreePath;
     const eventJson = JSON.stringify(eventPayload);
-    const first = runWorktreeEvent(eventOptions(runner, eventJson, undefined, herdrClient));
+    const first = runWorktreeEvent(eventOptions(runner, eventJson, herdrClient, bootstrap));
     const second = runWorktreeEvent(
       eventOptions(
         runner,
         JSON.stringify({ worktree: { path: worktreePath } }),
-        undefined,
         herdrClient,
+        bootstrap,
       ),
     );
-
     expect(first).toEqual({
       exitCode: 0,
       worktreePath,
@@ -161,27 +162,24 @@ describe("worktree plugin event hook", () => {
     });
     expect(second.opened).toBe(false);
     expect(second.error).toBe(undefined);
-    expect(openedPaths).toEqual([worktreePath]);
-
-    const setup = runWorktreeSetup({
-      allowCompleted: undefined,
-      mainCheckout,
-      now: () => "2026-09-08T01:00:01.000Z",
-      herdrClient,
-      runner,
-      syncReferences: () => undefined,
-      worktreePath,
-    });
-
-    expect(setup.exitCode).toBe(0);
-    expect(readWorktreeStatus(setup.statusPath)?.state).toBe("done");
-    expect(existsSync(setup.claimPath)).toBe(false);
+    expect(requestedPaths).toEqual([worktreePath, worktreePath]);
   });
 
   it("resolves a linked worktree from a focused workspace id", () => {
     const { mainCheckout, worktreePath } = makeProject();
     const [gitKey, gitResult] = gitResponse(mainCheckout, worktreePath);
-    const openedPaths: string[] = [];
+    const requestedPaths: string[] = [];
+    const bootstrap = createFakeWorktreeBootstrap({
+      request: ({ worktreePath: requestedPath }) => {
+        requestedPaths.push(requestedPath);
+        return {
+          state: "running",
+          claimed: true,
+          opened: true,
+          error: undefined,
+        };
+      },
+    });
     const herdrClient = createFakeHerdrClient({
       resolveWorktree: () => ({
         path: worktreePath,
@@ -190,21 +188,20 @@ describe("worktree plugin event hook", () => {
         openWorkspaceId: "w42",
         prunable: false,
       }),
-      openPluginPane: ({ cwd }) => openedPaths.push(cwd),
     });
     const runner = createRecordingRunner({ [gitKey]: gitResult });
 
     const event = runWorktreeEvent({
       eventJson: JSON.stringify({ workspace: { workspace_id: "w42" } }),
+      bootstrap,
       herdrClient,
-      now: () => "2026-09-08T01:00:00.000Z",
       runner,
       workspaceId: undefined,
     });
 
     expect(event.worktreePath).toBe(worktreePath);
     expect(event.opened).toBe(true);
-    expect(openedPaths).toEqual([worktreePath]);
+    expect(requestedPaths).toEqual([worktreePath]);
     expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
       ["git", "-C", worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir"],
     ]);
@@ -213,42 +210,46 @@ describe("worktree plugin event hook", () => {
   it("records an overlay launch failure and permits a later retry", () => {
     const { mainCheckout, worktreePath } = makeProject();
     const [gitKey, gitResult] = gitResponse(mainCheckout, worktreePath);
-    let openAttempts = 0;
-    const herdrClient = createFakeHerdrClient({
-      openPluginPane: () => {
-        openAttempts += 1;
-        if (openAttempts === 1) throw new Error("overlay unavailable");
+    let requestCount = 0;
+    const bootstrap = createFakeWorktreeBootstrap({
+      request: () => {
+        requestCount += 1;
+        return requestCount === 1
+          ? {
+              state: "failed",
+              claimed: true,
+              opened: false,
+              error: "overlay unavailable",
+            }
+          : {
+              state: "running",
+              claimed: true,
+              opened: true,
+              error: undefined,
+            };
       },
     });
+    const herdrClient = createFakeHerdrClient();
     const runner = createRecordingRunner({ [gitKey]: gitResult });
 
     const first = runWorktreeEvent(
       eventOptions(
         runner,
         JSON.stringify({ worktree: { path: worktreePath } }),
-        undefined,
         herdrClient,
+        bootstrap,
       ),
     );
-    const statusPaths = getWorktreeStatusPaths(mainCheckout, worktreePath);
 
     expect(first.opened).toBe(false);
     expect(first.error).toBe("overlay unavailable");
-    expect(readWorktreeStatus(statusPaths.statusPath)).toMatchObject({
-      path: worktreePath,
-      state: "failed",
-      error: "overlay unavailable",
-      started_at: "2026-09-08T01:00:00.000Z",
-      finished_at: "2026-09-08T01:00:00.000Z",
-    });
-    expect(existsSync(statusPaths.claimPath)).toBe(false);
 
     const second = runWorktreeEvent(
       eventOptions(
         runner,
         JSON.stringify({ worktree: { path: worktreePath } }),
-        undefined,
         herdrClient,
+        bootstrap,
       ),
     );
     expect(second.opened).toBe(true);
@@ -273,12 +274,12 @@ describe("worktree plugin event hook", () => {
     const runner = createRecordingRunner();
     const event = runWorktreeEvent({
       eventJson: JSON.stringify({ workspace: { workspace_id: "w42" } }),
+      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient: createFakeHerdrClient({
         resolveWorktree: () => {
           throw new Error("Herdr unavailable");
         },
       }),
-      now: () => "2026-09-08T01:00:00.000Z",
       runner,
       workspaceId: undefined,
     });

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { runCli, type CliDependencies } from "./cli.ts";
 import {
@@ -9,9 +9,8 @@ import {
 } from "./command-runner.ts";
 import type { HerdrPlugin } from "./herdr-client.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
+import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
 import { PROJECT_PLUGIN_ID } from "./worktree-plugin.ts";
-import { waitForWorktreeStatus } from "./worktree-create.ts";
-import { getWorktreeStatusPaths, type WorktreeStatus } from "./worktree-status.ts";
 
 const created: string[] = [];
 
@@ -47,21 +46,16 @@ const makeProject = (
 const gitKey = (cwd: string): string =>
   `git -C ${cwd} rev-parse --path-format=absolute --git-common-dir`;
 
-const writeStatus = (mainCheckout: string, worktreePath: string, status: WorktreeStatus): void => {
-  const paths = getWorktreeStatusPaths(mainCheckout, worktreePath);
-  mkdirSync(paths.directory, { recursive: true });
-  writeFileSync(paths.statusPath, `${JSON.stringify(status)}\n`, "utf8");
-};
-
 const dependencies = (
   cwd: string,
   runner: RecordingRunner,
-  overrides: Partial<Pick<CliDependencies, "herdrClient" | "readLine">> = {},
+  overrides: Partial<Pick<CliDependencies, "bootstrap" | "herdrClient" | "readLine">> = {},
 ): CliDependencies => ({
   cwd,
   now: () => "2026-09-08T01:00:00.000Z",
   readLine: () => "q",
   runner,
+  bootstrap: createFakeWorktreeBootstrap(),
   herdrClient: createFakeHerdrClient(),
   syncReferences: () => undefined,
   environment: {},
@@ -94,20 +88,24 @@ describe("worktree creation", () => {
     expect(runner.calls).toEqual([]);
   });
 
-  it("creates at the nested path, waits for done, and emits one JSON object", () => {
+  it("creates at the nested path, awaits bootstrap, and emits one JSON object", () => {
     const branch = "feature/capture";
     const { mainCheckout, worktreePath } = makeProject(branch);
+    const awaited: string[] = [];
+    const deadlines: number[] = [];
     const herdrClient = createFakeHerdrClient({
       listPlugins: () => [projectPlugin(true)],
       createWorktree: () => {
         mkdirSync(worktreePath, { recursive: true });
-        writeStatus(mainCheckout, worktreePath, {
-          path: worktreePath,
-          state: "done",
-          started_at: "2026-09-08T01:00:00.000Z",
-          finished_at: "2026-09-08T01:00:01.000Z",
-        });
         return { workspaceId: "w3", rootPaneId: "w3:p1" };
+      },
+    });
+    const bootstrap = createFakeWorktreeBootstrap({
+      await: ({ mainCheckout: awaitedMain, worktreePath: awaitedPath, deadline }) => {
+        if (typeof deadline !== "number") throw new Error("expected a numeric deadline");
+        awaited.push(`${awaitedMain}:${awaitedPath}`);
+        deadlines.push(deadline);
+        return { state: "done", error: undefined };
       },
     });
     const runner = createRecordingRunner({
@@ -123,7 +121,7 @@ describe("worktree creation", () => {
       runCli(
         ["wt", "create", branch, "--base", "main", "--no-focus", "--json"],
         io,
-        dependencies(mainCheckout, runner, { herdrClient }),
+        dependencies(mainCheckout, runner, { bootstrap, herdrClient }),
       ),
     ).toBe(0);
     expect(JSON.parse(output.stdout)).toEqual({
@@ -132,6 +130,8 @@ describe("worktree creation", () => {
     });
     expect(output.stdout.endsWith("\n")).toBe(true);
     expect(output.stderr).toBe("");
+    expect(awaited).toEqual([`${mainCheckout}:${realpathSync(worktreePath)}`]);
+    expect(deadlines).toEqual([Date.parse("2026-09-08T01:00:00.000Z") + 5 * 60 * 1000]);
     expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
       ["git", "-C", mainCheckout, "rev-parse", "--path-format=absolute", "--git-common-dir"],
     ]);
@@ -144,15 +144,14 @@ describe("worktree creation", () => {
       listPlugins: () => [projectPlugin(true)],
       createWorktree: () => {
         mkdirSync(worktreePath, { recursive: true });
-        writeStatus(mainCheckout, worktreePath, {
-          path: worktreePath,
-          state: "failed",
-          error: "devenv shell -- true failed with exit code 1: warm exploded",
-          started_at: "2026-09-08T01:00:00.000Z",
-          finished_at: "2026-09-08T01:00:02.000Z",
-        });
         return { workspaceId: "w3", rootPaneId: "w3:p1" };
       },
+    });
+    const bootstrap = createFakeWorktreeBootstrap({
+      await: () => ({
+        state: "failed",
+        error: "devenv shell -- true failed with exit code 1: warm exploded",
+      }),
     });
     const runner = createRecordingRunner({
       [gitKey(mainCheckout)]: result(0, `${mainCheckout}/.git\n`),
@@ -164,10 +163,47 @@ describe("worktree creation", () => {
     };
 
     expect(
-      runCli(["wt", "create", branch], io, dependencies(mainCheckout, runner, { herdrClient })),
+      runCli(
+        ["wt", "create", branch],
+        io,
+        dependencies(mainCheckout, runner, { bootstrap, herdrClient }),
+      ),
     ).toBe(1);
     expect(output.stdout).toBe("");
     expect(output.stderr).toContain("project wt create: devenv shell -- true");
+  });
+
+  it("reports a bootstrap timeout as a distinct non-zero outcome", () => {
+    const branch = "feature/timeout";
+    const { mainCheckout, worktreePath } = makeProject(branch);
+    const herdrClient = createFakeHerdrClient({
+      listPlugins: () => [projectPlugin(true)],
+      createWorktree: () => {
+        mkdirSync(worktreePath, { recursive: true });
+        return { workspaceId: "w3", rootPaneId: "w3:p1" };
+      },
+    });
+    const bootstrap = createFakeWorktreeBootstrap({
+      await: () => ({ state: "timeout", error: undefined }),
+    });
+    const runner = createRecordingRunner({
+      [gitKey(mainCheckout)]: result(0, `${mainCheckout}/.git\n`),
+    });
+    const output = { stdout: "", stderr: "" };
+    const io = {
+      stdout: (text: string) => (output.stdout += text),
+      stderr: (text: string) => (output.stderr += text),
+    };
+
+    expect(
+      runCli(
+        ["wt", "create", branch],
+        io,
+        dependencies(mainCheckout, runner, { bootstrap, herdrClient }),
+      ),
+    ).toBe(1);
+    expect(output.stdout).toBe("");
+    expect(output.stderr).toBe("project wt create: worktree bootstrap timed out\n");
   });
 
   it("prompts for a branch and creates a focused worktree", () => {
@@ -178,12 +214,6 @@ describe("worktree creation", () => {
       listPlugins: () => [projectPlugin(true)],
       createWorktree: () => {
         mkdirSync(worktreePath, { recursive: true });
-        writeStatus(mainCheckout, worktreePath, {
-          path: worktreePath,
-          state: "done",
-          started_at: "2026-09-08T01:00:00.000Z",
-          finished_at: "2026-09-08T01:00:01.000Z",
-        });
         return { workspaceId: "w3", rootPaneId: "w3:p1" };
       },
     });
@@ -215,44 +245,6 @@ describe("worktree creation", () => {
     expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
       ["git", "-C", mainCheckout, "rev-parse", "--path-format=absolute", "--git-common-dir"],
     ]);
-  });
-
-  it("keeps waiting when the status starts running", () => {
-    const root = mkdtempSync(join("/tmp", "devenv-agents-wait-"));
-    const statusPath = join(root, "status.json");
-    created.push(root);
-    writeFileSync(
-      statusPath,
-      JSON.stringify({
-        path: "/tmp/worktree",
-        state: "running",
-        started_at: "2026-09-08T01:00:00.000Z",
-      }),
-      "utf8",
-    );
-    let sleeps = 0;
-
-    expect(
-      waitForWorktreeStatus(statusPath, () => {
-        sleeps += 1;
-        writeFileSync(
-          statusPath,
-          JSON.stringify({
-            path: "/tmp/worktree",
-            state: "done",
-            started_at: "2026-09-08T01:00:00.000Z",
-            finished_at: "2026-09-08T01:00:01.000Z",
-          }),
-          "utf8",
-        );
-      }),
-    ).toEqual({
-      path: "/tmp/worktree",
-      state: "done",
-      started_at: "2026-09-08T01:00:00.000Z",
-      finished_at: "2026-09-08T01:00:01.000Z",
-    });
-    expect(sleeps).toBe(1);
   });
 
   it("rejects a disabled plugin before creating a worktree", () => {

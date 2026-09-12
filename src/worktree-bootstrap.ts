@@ -11,20 +11,25 @@
  * 4. The owner writes `done` or `failed` before releasing the claim. A later
  *    run removes an owner marker left without a status and retries the work.
  */
-import { existsSync, lstatSync, readlinkSync, symlinkSync, unlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { errorMessage, runRequiredCommand, type CommandRunner } from "./command-runner.ts";
 import type { HerdrClient, HerdrPane } from "./herdr-client.ts";
 import { readProjectDeclaration } from "./project-declaration.ts";
 import type { SyncReferences } from "./project-sync.ts";
-import {
-  claimWorktreeStatus,
-  forgetWorktreeStatus,
-  getWorktreeStatusPaths,
-  readWorktreeStatus,
-  type WorktreeStatus,
-} from "./worktree-bootstrap-state.ts";
-import { resolveMainCheckout, samePath } from "./workspace.ts";
+import { canonicalPath, resolveMainCheckout, samePath } from "./workspace.ts";
 
 /**
  * The Herdr plugin identifier used by the setup overlay.
@@ -198,7 +203,267 @@ export interface WorktreeBootstrap {
   forget(options: WorktreeBootstrapForgetOptions): void;
 }
 
+type WorktreeStatusState = "running" | "done" | "failed";
+
+type RunningWorktreeStatus = {
+  readonly path: string;
+  readonly state: "running";
+  readonly started_at: string;
+};
+
+type DoneWorktreeStatus = {
+  readonly path: string;
+  readonly state: "done";
+  readonly started_at: string;
+  readonly finished_at: string;
+};
+
+type FailedWorktreeStatus = {
+  readonly path: string;
+  readonly state: "failed";
+  readonly error: string;
+  readonly started_at: string;
+  readonly finished_at: string;
+};
+
+type WorktreeStatus = RunningWorktreeStatus | DoneWorktreeStatus | FailedWorktreeStatus;
+
+type WorktreeStatusPaths = {
+  readonly mainCheckout: string;
+  readonly worktreePath: string;
+  readonly hash: string;
+  readonly directory: string;
+  readonly statusPath: string;
+  readonly claimPath: string;
+};
+
+type WorktreeStatusClaim = {
+  readonly paths: WorktreeStatusPaths;
+  readonly startedAt: string;
+  readonly write: (
+    state: WorktreeStatusState,
+    error: string | undefined,
+    finishedAt: string | undefined,
+  ) => void;
+  readonly release: () => void;
+  readonly handoff: () => void;
+  readonly cancelHandoff: () => boolean;
+};
+
 const defaultNow = (): string => new Date().toISOString();
+const worktreeStatusRoot = (mainCheckout: string): string =>
+  join(canonicalPath(mainCheckout), ".devenv", "state", "project", "worktrees");
+const SETUP_HANDOFF = ".setup-handoff";
+const SETUP_OWNER = ".setup-owner";
+const SETUP_CANCELLED = ".setup-cancelled";
+
+const worktreeStatusHash = (canonicalWorktreePath: string): string =>
+  createHash("sha1").update(canonicalWorktreePath).digest("hex").slice(0, 16);
+
+const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
+  error instanceof Error && "code" in error;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const readStatusString = (record: Record<string, unknown>, key: string): string | undefined => {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+};
+
+const parseStatus = (value: unknown): WorktreeStatus | undefined => {
+  if (!isRecord(value)) return undefined;
+  const path = readStatusString(value, "path");
+  const state = readStatusString(value, "state");
+  const startedAt = readStatusString(value, "started_at");
+  if (path === undefined || startedAt === undefined) return undefined;
+
+  if (state === "running") return { path, state, started_at: startedAt };
+
+  const finishedAt = readStatusString(value, "finished_at");
+  if (finishedAt === undefined) return undefined;
+  if (state === "done") return { path, state, started_at: startedAt, finished_at: finishedAt };
+
+  const error = readStatusString(value, "error");
+  if (state === "failed" && error !== undefined) {
+    return { path, state, error, started_at: startedAt, finished_at: finishedAt };
+  }
+  return undefined;
+};
+
+const writeJsonAtomically = (path: string, value: WorktreeStatus): void => {
+  const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(value)}\n`, "utf8");
+  renameSync(temporaryPath, path);
+};
+
+const getWorktreeStatusPaths = (
+  mainCheckout: string,
+  worktreePath: string,
+): WorktreeStatusPaths => {
+  const canonicalMainCheckout = canonicalPath(mainCheckout);
+  const canonicalWorktreePath = canonicalPath(worktreePath);
+  const hash = worktreeStatusHash(canonicalWorktreePath);
+  const directory = join(worktreeStatusRoot(canonicalMainCheckout), hash);
+  return {
+    mainCheckout: canonicalMainCheckout,
+    worktreePath: canonicalWorktreePath,
+    hash,
+    directory,
+    statusPath: join(directory, "status.json"),
+    claimPath: join(directory, ".claim"),
+  };
+};
+
+const readWorktreeStatus = (statusPath: string): WorktreeStatus | undefined => {
+  if (!existsSync(statusPath)) return undefined;
+  try {
+    return parseStatus(JSON.parse(readFileSync(statusPath, "utf8")) as unknown);
+  } catch {
+    return undefined;
+  }
+};
+
+const forgetWorktreeStatus = (mainCheckout: string, worktreePath: string): void => {
+  const paths = getWorktreeStatusPaths(mainCheckout, worktreePath);
+  rmSync(paths.directory, { recursive: true, force: true });
+};
+
+const createClaim = (paths: WorktreeStatusPaths, startedAt: string): WorktreeStatusClaim => {
+  const handoffPath = join(paths.claimPath, SETUP_HANDOFF);
+  let released = false;
+  let handedOff = false;
+  return {
+    paths,
+    startedAt,
+    write: (state, error, finishedAt) => {
+      const timestamp = finishedAt ?? (state === "running" ? undefined : defaultNow());
+      if (state === "running") {
+        writeJsonAtomically(paths.statusPath, {
+          path: paths.worktreePath,
+          state,
+          started_at: startedAt,
+        });
+        return;
+      }
+      if (timestamp === undefined) {
+        throw new Error(`Missing finished timestamp for ${state} worktree status`);
+      }
+      if (state === "done") {
+        writeJsonAtomically(paths.statusPath, {
+          path: paths.worktreePath,
+          state,
+          started_at: startedAt,
+          finished_at: timestamp,
+        });
+        return;
+      }
+      if (error === undefined || error.length === 0) {
+        throw new Error("Missing error for failed worktree status");
+      }
+      writeJsonAtomically(paths.statusPath, {
+        path: paths.worktreePath,
+        state,
+        error,
+        started_at: startedAt,
+        finished_at: timestamp,
+      });
+    },
+    release: () => {
+      if (released) return;
+      released = true;
+      rmSync(paths.claimPath, { recursive: true, force: true });
+    },
+    handoff: () => {
+      if (released) return;
+      mkdirSync(handoffPath);
+      handedOff = true;
+      released = true;
+    },
+    cancelHandoff: () => {
+      if (!handedOff) {
+        if (released) return false;
+        released = true;
+        rmSync(paths.claimPath, { recursive: true, force: true });
+        return true;
+      }
+      handedOff = false;
+      try {
+        renameSync(handoffPath, join(paths.claimPath, SETUP_CANCELLED));
+      } catch (error) {
+        if (isNodeError(error) && (error.code === "ENOENT" || error.code === "EEXIST"))
+          return false;
+        throw error;
+      }
+      rmSync(paths.claimPath, { recursive: true, force: true });
+      return true;
+    },
+  };
+};
+
+const adoptSetupHandoff = (paths: WorktreeStatusPaths): WorktreeStatusClaim | undefined => {
+  const handoffPath = join(paths.claimPath, SETUP_HANDOFF);
+  const ownerPath = join(paths.claimPath, SETUP_OWNER);
+  try {
+    renameSync(handoffPath, ownerPath);
+  } catch (error) {
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "EEXIST"))
+      return undefined;
+    throw error;
+  }
+
+  const status = readWorktreeStatus(paths.statusPath);
+  if (status?.state !== "running") {
+    rmSync(paths.claimPath, { recursive: true, force: true });
+    return undefined;
+  }
+  return createClaim(paths, status.started_at);
+};
+
+const recoverStaleOwnerClaim = (paths: WorktreeStatusPaths): boolean => {
+  if (existsSync(paths.statusPath) || !existsSync(join(paths.claimPath, SETUP_OWNER))) {
+    return false;
+  }
+  rmSync(paths.claimPath, { recursive: true, force: true });
+  return true;
+};
+
+const claimWorktreeStatus = (
+  mainCheckout: string,
+  worktreePath: string,
+  now: (() => string) | undefined = undefined,
+  allowCompleted: boolean | undefined = undefined,
+  adoptHandoff: boolean | undefined = undefined,
+): WorktreeStatusClaim | undefined => {
+  const paths = getWorktreeStatusPaths(mainCheckout, worktreePath);
+  const current = readWorktreeStatus(paths.statusPath);
+  if (current?.state === "done" && allowCompleted !== true) return undefined;
+
+  mkdirSync(dirname(paths.statusPath), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      mkdirSync(paths.claimPath);
+      const afterClaim = readWorktreeStatus(paths.statusPath);
+      if (afterClaim?.state === "done" && allowCompleted !== true) {
+        rmSync(paths.claimPath, { recursive: true, force: true });
+        return undefined;
+      }
+      return createClaim(paths, (now ?? defaultNow)());
+    } catch (error) {
+      if (isNodeError(error) && error.code === "EEXIST") {
+        if (adoptHandoff !== true) return undefined;
+        const adopted = adoptSetupHandoff(paths);
+        if (adopted !== undefined) return adopted;
+        if (recoverStaleOwnerClaim(paths)) continue;
+        return undefined;
+      }
+      rmSync(paths.claimPath, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
+  return undefined;
+};
 
 const defaultSleep = (): void => {
   const signal = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
@@ -207,9 +472,6 @@ const defaultSleep = (): void => {
 
 const hasDevenvFile = (worktreePath: string): boolean =>
   ["devenv.nix", "devenv.yaml", "devenv.yml"].some((file) => existsSync(join(worktreePath, file)));
-
-const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
-  error instanceof Error && "code" in error;
 
 const linkLocalLayer = (mainCheckout: string, worktreePath: string): void => {
   const source = join(mainCheckout, "devenv.local.nix");

@@ -9,6 +9,7 @@ import {
 } from "./command-runner.ts";
 import { runCli, type CliDependencies } from "./cli.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
+import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
 import { writeProjectsFile, type ProjectRegistration } from "./project-add.ts";
 import { formatProjectUpdate, runProjectUpdate } from "./project-update.ts";
 import { createGitFixture } from "./testing/git-fixture.ts";
@@ -220,6 +221,7 @@ describe("project update", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient: createFakeHerdrClient(),
       syncReferences: () => undefined,
       environment: {},
@@ -262,6 +264,7 @@ describe("project update", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient: createFakeHerdrClient(),
       syncReferences: () => undefined,
       environment: {

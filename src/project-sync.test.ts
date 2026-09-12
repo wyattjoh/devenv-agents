@@ -19,6 +19,7 @@ import {
 } from "./command-runner.ts";
 import { runCli, type CliDependencies } from "./cli.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
+import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
 import { readProjectDeclaration, type ProjectDeclaration } from "./project-declaration.ts";
 import {
   createSyncReferences,
@@ -426,6 +427,7 @@ describe("project reference synchronization", () => {
           now: () => "2026-09-08T01:00:00.000Z",
           readLine: () => "q",
           runner: realCommandRunner,
+          bootstrap: createFakeWorktreeBootstrap(),
           herdrClient: createFakeHerdrClient(),
           syncReferences: createSyncReferences({ codeRoot, runner: realCommandRunner }),
           environment: {},

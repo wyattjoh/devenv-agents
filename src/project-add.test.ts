@@ -18,6 +18,7 @@ import {
 import { runCli, type CliDependencies, type CliIO } from "./cli.ts";
 import type { HerdrPlugin } from "./herdr-client.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
+import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
 import {
   enumerateProjects,
   parseProjectRepository,
@@ -256,6 +257,7 @@ describe("project add", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient: enabledHerdrClient(),
       syncReferences: () => undefined,
       environment: {
@@ -295,6 +297,7 @@ describe("project add", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient: enabledHerdrClient(),
       syncReferences: () => undefined,
       environment: {
@@ -323,6 +326,7 @@ describe("project add", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient: createFakeHerdrClient(),
       syncReferences: () => undefined,
       environment: { PROJECT_PLATFORM: "freebsd", PROJECT_HOME: fixture.home },

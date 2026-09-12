@@ -3,7 +3,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { errorMessage, type CommandRunner } from "./command-runner.ts";
 import type { HerdrClient, HerdrPlugin } from "./herdr-client.ts";
 import { PROJECT_DECLARATION_PATH } from "./project-declaration.ts";
-import { claimWorktreeStatus } from "./worktree-status.ts";
+import type { WorktreeBootstrap } from "./worktree-bootstrap.ts";
 import { canonicalPath, resolveMainCheckout, samePath } from "./workspace.ts";
 
 /**
@@ -32,9 +32,9 @@ export type PluginEnvironment = Readonly<Record<string, string | undefined>>;
 export type WorktreeEventOptions = {
   readonly eventJson: string | undefined;
   readonly workspaceId: string | undefined;
+  readonly bootstrap: WorktreeBootstrap;
   readonly herdrClient: HerdrClient;
   readonly runner: CommandRunner;
-  readonly now: (() => string) | undefined;
 };
 
 /**
@@ -77,8 +77,6 @@ type PluginManifest = {
   readonly id: string;
   readonly version: string;
 };
-
-const defaultNow = (): string => new Date().toISOString();
 
 const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null;
@@ -184,11 +182,11 @@ const skippedEvent = (
  * Handles one Herdr worktree lifecycle event.
  *
  * The hook is deliberately fail-open: unrelated events, malformed payloads,
- * unavailable sockets, and overlay launch failures return exit code zero. A
- * status claim is handed to the setup pane through an atomic marker rename, so
- * the setup process can acquire the same claim while duplicate events no-op.
+ * unavailable sockets, and overlay launch failures return exit code zero. The
+ * bootstrap request hands its claim to the setup pane through an atomic marker
+ * rename, so duplicate events no-op without opening another overlay.
  *
- * @param options Event payload, Herdr client, runner, and clock dependencies.
+ * @param options Event payload, bootstrap, Herdr client, and runner dependencies.
  * @returns The observable event result without terminating the caller.
  */
 export const runWorktreeEvent = (options: WorktreeEventOptions): WorktreeEventResult => {
@@ -203,50 +201,24 @@ export const runWorktreeEvent = (options: WorktreeEventOptions): WorktreeEventRe
   }
   if (!hasProjectDeclaration(mainCheckout)) return skippedEvent(worktreePath, mainCheckout);
 
-  let claim: ReturnType<typeof claimWorktreeStatus> = undefined;
   try {
-    claim = claimWorktreeStatus(mainCheckout, worktreePath, options.now);
-    if (claim === undefined) return skippedEvent(worktreePath, mainCheckout);
-
-    claim.write("running", undefined, undefined);
-    claim.handoff();
-    options.herdrClient.openPluginPane({
-      pluginId: PROJECT_PLUGIN_ID,
-      entrypoint: "setup",
-      placement: "overlay",
-      cwd: worktreePath,
-    });
-
+    const request = options.bootstrap.request({ mainCheckout, worktreePath });
     return {
       exitCode: 0,
       worktreePath,
       mainCheckout,
-      claimed: true,
-      opened: true,
-      error: undefined,
+      claimed: request.claimed,
+      opened: request.opened,
+      error: request.error,
     };
   } catch (error) {
-    const message = errorMessage(error);
-    let ownsClaim = false;
-    try {
-      ownsClaim = claim?.cancelHandoff() ?? false;
-    } catch {
-      // The event hook remains fail-open if claim cleanup itself fails.
-    }
-    if (ownsClaim && claim !== undefined) {
-      try {
-        claim.write("failed", message, (options.now ?? defaultNow)());
-      } catch {
-        // The event hook remains fail-open if status persistence itself fails.
-      }
-    }
     return {
       exitCode: 0,
       worktreePath,
       mainCheckout,
-      claimed: claim !== undefined,
+      claimed: false,
       opened: false,
-      error: message,
+      error: errorMessage(error),
     };
   }
 };

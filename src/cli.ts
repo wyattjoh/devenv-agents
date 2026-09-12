@@ -15,6 +15,11 @@ import {
   runAdoptWorktrees,
   runProjectGc,
 } from "./project-gc.ts";
+import {
+  createWorktreeBootstrap,
+  type WorktreeBootstrap,
+  type WorktreeBootstrapResult,
+} from "./worktree-bootstrap.ts";
 import { runWorktreeCreate, type WorktreeCreateResult } from "./worktree-create.ts";
 import {
   PROJECT_PLUGIN_ID,
@@ -24,7 +29,6 @@ import {
   type PluginEnvironment,
 } from "./worktree-plugin.ts";
 import { createSyncReferences, runProjectSync, type SyncReferences } from "./project-sync.ts";
-import { runInteractiveWorktreeSetup, runWorktreeSetup } from "./worktree-setup.ts";
 
 /**
  * The public command name used by the standalone binary and the Bun entrypoint.
@@ -90,6 +94,7 @@ export type CliDependencies = {
   readonly runner: CommandRunner;
   readonly herdrClient: HerdrClient;
   readonly syncReferences: SyncReferences;
+  readonly bootstrap: WorktreeBootstrap;
   /**
    * Environment snapshot used by Herdr commands, or undefined for process.env.
    */
@@ -101,6 +106,14 @@ export type CliDependencies = {
 };
 
 const BRANCH_PROMPT = "Branch name: ";
+const WORKTREE_BOOTSTRAP_TIMEOUT_MS = 5 * 60 * 1000;
+const defaultNow = (): string => new Date().toISOString();
+
+const worktreeBootstrapDeadline = (now: () => string): number => {
+  const current = Date.parse(now());
+  if (Number.isNaN(current)) throw new Error("Invalid bootstrap clock value");
+  return current + WORKTREE_BOOTSTRAP_TIMEOUT_MS;
+};
 
 const interactiveLine = (message = "Press Enter to retry or q to quit: "): string => {
   const promptFunction = (
@@ -111,16 +124,28 @@ const interactiveLine = (message = "Press Enter to retry or q to quit: "): strin
   return promptFunction?.(message) ?? (message === BRANCH_PROMPT ? "" : "q");
 };
 
-const defaultDependencies = (): CliDependencies => ({
-  cwd: undefined,
-  now: () => new Date().toISOString(),
-  readLine: interactiveLine,
-  runner: defaultCommandRunner,
-  herdrClient: createHerdrClient(defaultCommandRunner, process.env.HERDR_BIN_PATH),
-  syncReferences: createSyncReferences({ runner: defaultCommandRunner }),
-  environment: undefined,
-  pluginPath: undefined,
-});
+const defaultDependencies = (): CliDependencies => {
+  const now = defaultNow;
+  const runner = defaultCommandRunner;
+  const herdrClient = createHerdrClient(runner, process.env.HERDR_BIN_PATH);
+  const syncReferences = createSyncReferences({ runner });
+  return {
+    cwd: undefined,
+    now,
+    readLine: interactiveLine,
+    runner,
+    herdrClient,
+    syncReferences,
+    bootstrap: createWorktreeBootstrap({
+      herdrClient,
+      now,
+      runner,
+      syncReferences,
+    }),
+    environment: undefined,
+    pluginPath: undefined,
+  };
+};
 
 const isHelpFlag = (argument: string): boolean => argument === "--help" || argument === "-h";
 
@@ -137,24 +162,23 @@ const runWorktreeSetupCommand = (
   dependencies: CliDependencies,
   interactive: boolean,
 ): number => {
-  const options = {
-    allowCompleted: true,
-    mainCheckout: undefined,
-    now: dependencies.now,
-    herdrClient: dependencies.herdrClient,
-    runner: dependencies.runner,
-    syncReferences: dependencies.syncReferences,
-    worktreePath: dependencies.cwd ?? process.cwd(),
-  };
-  const reportFailure = (result: ReturnType<typeof runWorktreeSetup>): void => {
+  const reportFailure = (result: WorktreeBootstrapResult): void => {
     output.stderr(`${PROJECT_NAME} worktree-setup: ${result.error ?? "setup failed"}\n`);
     if (interactive) output.stderr("Press Enter to retry or q to quit.\n");
   };
 
   try {
-    const result = interactive
-      ? runInteractiveWorktreeSetup(options, dependencies.readLine, reportFailure)
-      : runWorktreeSetup(options);
+    const result = dependencies.bootstrap.run({
+      allowCompleted: true,
+      io: interactive
+        ? {
+            onFailure: reportFailure,
+            readLine: dependencies.readLine,
+          }
+        : undefined,
+      mainCheckout: undefined,
+      worktreePath: dependencies.cwd ?? process.cwd(),
+    });
     if (result.exitCode !== 0 && !interactive) reportFailure(result);
     return result.exitCode;
   } catch (error) {
@@ -169,8 +193,8 @@ const runWorktreeEventCommand = (dependencies: CliDependencies): number => {
   return runWorktreeEvent({
     eventJson: environment.HERDR_PLUGIN_EVENT_JSON,
     workspaceId: environment.HERDR_WORKSPACE_ID,
+    bootstrap: dependencies.bootstrap,
     herdrClient: dependencies.herdrClient,
-    now: dependencies.now,
     runner: dependencies.runner,
   }).exitCode;
 };
@@ -228,6 +252,8 @@ const runWorktreeCreateCommand = (
     const result = runWorktreeCreate({
       base,
       branch,
+      bootstrap: dependencies.bootstrap,
+      deadline: worktreeBootstrapDeadline(dependencies.now),
       cwd: dependencies.cwd ?? process.cwd(),
       focus,
       herdrClient: dependencies.herdrClient,
@@ -337,6 +363,7 @@ const runProjectGcCommand = (
   try {
     if (!all) {
       const result = runProjectGc({
+        bootstrap: dependencies.bootstrap,
         buildDirectories: undefined,
         dryRun,
         herdrClient: dependencies.herdrClient,
@@ -358,6 +385,7 @@ const runProjectGcCommand = (
     for (const project of projects) {
       try {
         const result = runProjectGc({
+          bootstrap: dependencies.bootstrap,
           buildDirectories: undefined,
           dryRun,
           herdrClient: dependencies.herdrClient,
@@ -398,11 +426,10 @@ const runAdoptWorktreesCommand = (
   try {
     if (!all) {
       const result = runAdoptWorktrees({
+        bootstrap: dependencies.bootstrap,
         herdrClient: dependencies.herdrClient,
-        now: dependencies.now,
         projectPath: dependencies.cwd ?? process.cwd(),
         runner: dependencies.runner,
-        syncReferences: dependencies.syncReferences,
       });
       output.stdout(formatAdoptWorktrees(result));
       return result.exitCode;
@@ -419,11 +446,10 @@ const runAdoptWorktreesCommand = (
     for (const project of projects) {
       try {
         const result = runAdoptWorktrees({
+          bootstrap: dependencies.bootstrap,
           herdrClient: dependencies.herdrClient,
-          now: dependencies.now,
           projectPath: project.path,
           runner: dependencies.runner,
-          syncReferences: dependencies.syncReferences,
         });
         output.stdout(formatAdoptWorktrees(result, project.repo));
         if (result.exitCode !== 0) exitCode = 1;

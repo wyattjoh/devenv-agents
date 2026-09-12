@@ -7,13 +7,11 @@ import {
   type CommandRunner,
 } from "./command-runner.ts";
 import type { HerdrClient, HerdrWorktree } from "./herdr-client.ts";
-import {
-  listWorktreeStatuses,
-  removeWorktreeStatusEntry,
-  worktreeStatusHash,
-  type WorktreeStatus,
-  type WorktreeStatusEntry,
-} from "./worktree-status.ts";
+import type {
+  WorktreeBootstrap,
+  WorktreeBootstrapInspection,
+  WorktreeBootstrapResult,
+} from "./worktree-bootstrap.ts";
 import {
   canonicalPath,
   getManagedWorktreeRoot,
@@ -23,8 +21,6 @@ import {
   worktreeLabel,
   type WorkspaceWorktree,
 } from "./workspace.ts";
-import { runWorktreeSetup, type WorktreeSetupResult } from "./worktree-setup.ts";
-import type { SyncReferences } from "./project-sync.ts";
 
 /**
  * Per-worktree build directories reclaimed by project garbage collection.
@@ -44,7 +40,7 @@ export type RemovableWorktree = {
   readonly branch: string;
   readonly workspaceId: string | undefined;
   readonly buildDirectories: readonly string[];
-  readonly statusEntry: WorktreeStatusEntry | undefined;
+  readonly bootstrap: WorktreeBootstrapInspection;
 };
 
 /**
@@ -55,7 +51,7 @@ export type BusyWorktree = {
   readonly branch: string | undefined;
   readonly workspaceId: string | undefined;
   readonly reason: string;
-  readonly status: WorktreeStatus | undefined;
+  readonly bootstrap: WorktreeBootstrapInspection;
 };
 
 /**
@@ -67,12 +63,11 @@ export type DetachedWorkspace = {
 };
 
 /**
- * A status entry with no corresponding Git worktree registration.
+ * A terminal bootstrap record for a missing worktree registration.
  */
 export type StaleWorktreeStatus = {
   readonly path: string;
-  readonly statusPath: string;
-  readonly entry: WorktreeStatusEntry;
+  readonly bootstrap: WorktreeBootstrapInspection;
 };
 
 /**
@@ -103,6 +98,7 @@ export type ProjectGcOptions = {
   readonly dryRun: boolean;
   readonly herdrClient: HerdrClient;
   readonly runner: CommandRunner;
+  readonly bootstrap: WorktreeBootstrap;
   readonly buildDirectories: readonly string[] | undefined;
 };
 
@@ -133,10 +129,9 @@ export type ProjectGcResult = ProjectGcPlan & {
  */
 export type AdoptWorktreesOptions = {
   readonly projectPath: string;
+  readonly bootstrap: WorktreeBootstrap;
   readonly herdrClient: HerdrClient;
   readonly runner: CommandRunner;
-  readonly syncReferences: SyncReferences;
-  readonly now: (() => string) | undefined;
 };
 
 /**
@@ -145,7 +140,7 @@ export type AdoptWorktreesOptions = {
 export type AdoptWorktreeItem = {
   readonly path: string;
   readonly branch: string | undefined;
-  readonly setup: WorktreeSetupResult | undefined;
+  readonly bootstrap: WorktreeBootstrapResult | undefined;
   readonly opened: boolean;
   readonly workspaceId: string | undefined;
   readonly error: string | undefined;
@@ -194,19 +189,6 @@ const listHerdrWorktrees = (
   herdrClient
     .listWorktrees({ cwd: mainCheckout, workspaceId: undefined })
     .filter((worktree) => worktree.linked === true);
-
-const statusForPath = (
-  entries: readonly WorktreeStatusEntry[],
-  path: string,
-): WorktreeStatusEntry | undefined => {
-  const canonical = canonicalPath(path);
-  const hash = worktreeStatusHash(canonical);
-  return entries.find(
-    (entry) =>
-      entry.hash === hash ||
-      (entry.status?.path !== undefined && samePath(entry.status.path, canonical)),
-  );
-};
 
 const validBuildDirectories = (
   worktreePath: string,
@@ -262,7 +244,7 @@ const worktreeByPath = (
 /**
  * Builds a non-mutating cleanup plan for one project's worktrees.
  *
- * @param options Project path and injected Git runner and Herdr client.
+ * @param options Project path and injected Git runner, Herdr client, and bootstrap.
  * @returns Every removable, busy, detached, stale, and unregistered item.
  */
 const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan => {
@@ -271,25 +253,33 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
   const gitWorktrees = listLinkedWorktrees(mainCheckout, options.runner);
   const herdrWorktrees = listHerdrWorktrees(options.herdrClient, mainCheckout);
   const herdrByPath = worktreeByPath(herdrWorktrees);
-  const statusEntries = listWorktreeStatuses(mainCheckout);
-  const existingGitWorktrees = gitWorktrees.filter((worktree) => isDirectory(worktree.path));
-  const registeredPaths = new Set(
-    existingGitWorktrees.map((worktree) => canonicalPath(worktree.path)),
-  );
-  const registeredStatusHashes = new Set(
-    existingGitWorktrees.map((worktree) => worktreeStatusHash(canonicalPath(worktree.path))),
-  );
+  const bootstrapByPath = new Map<string, WorktreeBootstrapInspection>();
+  const inspectBootstrap = (worktreePath: string): WorktreeBootstrapInspection => {
+    const canonical = canonicalPath(worktreePath);
+    const existing = bootstrapByPath.get(canonical);
+    if (existing !== undefined) return existing;
+    const inspection = options.bootstrap.inspect({ mainCheckout, worktreePath });
+    bootstrapByPath.set(canonical, inspection);
+    return inspection;
+  };
   const removable: RemovableWorktree[] = [];
   const busy: BusyWorktree[] = [];
 
   for (const worktree of gitWorktrees) {
     const herdr = herdrByPath.get(canonicalPath(worktree.path));
-    const statusEntry = statusForPath(statusEntries, worktree.path);
-    const status = statusEntry?.status;
-    const statusClaimed =
-      statusEntry !== undefined && existsSync(join(statusEntry.directory, ".claim"));
+    const bootstrap = inspectBootstrap(worktree.path);
     const exists = isDirectory(worktree.path);
 
+    if (bootstrap.state === "running") {
+      busy.push({
+        path: worktree.path,
+        branch: worktree.branch,
+        workspaceId: herdr?.openWorkspaceId,
+        reason: "bootstrap is running",
+        bootstrap,
+      });
+      continue;
+    }
     if (herdr?.openWorkspaceId !== undefined && !exists) continue;
     if (!exists) {
       busy.push({
@@ -297,27 +287,7 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
         branch: worktree.branch,
         workspaceId: herdr?.openWorkspaceId,
         reason: "checkout is missing",
-        status,
-      });
-      continue;
-    }
-    if (statusClaimed || status?.state === "running") {
-      busy.push({
-        path: worktree.path,
-        branch: worktree.branch,
-        workspaceId: herdr?.openWorkspaceId,
-        reason: "bootstrap is running",
-        status,
-      });
-      continue;
-    }
-    if (statusEntry !== undefined && status === undefined) {
-      busy.push({
-        path: worktree.path,
-        branch: worktree.branch,
-        workspaceId: herdr?.openWorkspaceId,
-        reason: "status is invalid",
-        status,
+        bootstrap,
       });
       continue;
     }
@@ -327,7 +297,7 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
         branch: worktree.branch,
         workspaceId: herdr.openWorkspaceId,
         reason: "workspace is open",
-        status,
+        bootstrap,
       });
       continue;
     }
@@ -337,7 +307,7 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
         branch: worktree.branch,
         workspaceId: undefined,
         reason: "checkout is detached",
-        status,
+        bootstrap,
       });
       continue;
     }
@@ -354,7 +324,7 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
         branch: worktree.branch,
         workspaceId: undefined,
         reason: "worktree is dirty",
-        status,
+        bootstrap,
       });
       continue;
     }
@@ -370,7 +340,7 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
         branch: worktree.branch,
         workspaceId: undefined,
         reason: "branch is not merged into the target",
-        status,
+        bootstrap,
       });
       continue;
     }
@@ -380,7 +350,7 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
       branch: worktree.branch,
       workspaceId: undefined,
       buildDirectories: existingBuildDirectories(worktree.path, options.buildDirectories),
-      statusEntry,
+      bootstrap,
     });
   }
 
@@ -399,16 +369,18 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
     )
     .toSorted((left, right) => left.path.localeCompare(right.path));
 
-  const staleStatuses: StaleWorktreeStatus[] = statusEntries
-    .filter((entry) => {
-      if (entry.status?.path === undefined) return !registeredStatusHashes.has(entry.hash);
-      return !registeredPaths.has(canonicalPath(entry.status.path));
-    })
-    .map((entry) => ({
-      path: entry.status?.path ?? entry.statusPath,
-      statusPath: entry.statusPath,
-      entry,
+  const knownWorktreePaths = new Map<string, string>();
+  for (const worktree of [...gitWorktrees, ...herdrWorktrees]) {
+    const canonical = canonicalPath(worktree.path);
+    knownWorktreePaths.set(canonical, worktree.path);
+  }
+  const staleStatuses: StaleWorktreeStatus[] = [...knownWorktreePaths.entries()]
+    .filter(([canonical]) => !isDirectory(canonical))
+    .map(([canonical, path]) => ({
+      path: canonical,
+      bootstrap: bootstrapByPath.get(canonical) ?? inspectBootstrap(path),
     }))
+    .filter((status) => status.bootstrap.state !== "none" && status.bootstrap.state !== "running")
     .toSorted((left, right) => left.path.localeCompare(right.path));
 
   return {
@@ -471,24 +443,28 @@ const applyProjectGc = (
         failures.push(cleanupFailure("delete build directory", buildDirectory, error));
       }
     }
-    if (worktree.statusEntry !== undefined) {
+    if (worktree.bootstrap.state !== "none") {
       try {
-        removeWorktreeStatusEntry(worktree.statusEntry);
-        deletedStatuses.push(worktree.statusEntry.statusPath);
+        options.bootstrap.forget({
+          mainCheckout: plan.mainCheckout,
+          worktreePath: worktree.path,
+        });
+        deletedStatuses.push(worktree.path);
       } catch (error) {
-        failures.push(
-          cleanupFailure("remove worktree status", worktree.statusEntry.statusPath, error),
-        );
+        failures.push(cleanupFailure("remove worktree bootstrap", worktree.path, error));
       }
     }
   }
 
   for (const stale of plan.staleStatuses) {
     try {
-      removeWorktreeStatusEntry(stale.entry);
-      deletedStatuses.push(stale.statusPath);
+      options.bootstrap.forget({
+        mainCheckout: plan.mainCheckout,
+        worktreePath: stale.path,
+      });
+      deletedStatuses.push(stale.path);
     } catch (error) {
-      failures.push(cleanupFailure("remove stale status", stale.statusPath, error));
+      failures.push(cleanupFailure("remove stale bootstrap", stale.path, error));
     }
   }
 
@@ -577,7 +553,7 @@ export const formatProjectGc = (
   );
   section(
     "Stale status entries",
-    result.staleStatuses.map((status) => `${status.statusPath} (${status.path})`),
+    result.staleStatuses.map((status) => `${status.path} (${status.bootstrap.state})`),
   );
   section(
     "Unregistered directories",
@@ -624,10 +600,10 @@ const openWorktree = (
  * Bootstraps every existing linked worktree and opens missing Herdr workspaces.
  *
  * The main checkout is skipped. Existing workspaces are left untouched; a
- * missing workspace is opened without focus after the setup attempt so failed
+ * missing workspace is opened without focus after the bootstrap attempt so failed
  * adoption remains visible and retryable through the plugin overlay.
  *
- * @param options Project path, setup seam, and injected Herdr client.
+ * @param options Project path, bootstrap seam, and injected Herdr client.
  * @returns Ordered per-worktree adoption results and an aggregate exit code.
  */
 export const runAdoptWorktrees = (options: AdoptWorktreesOptions): AdoptWorktreesResult => {
@@ -642,7 +618,7 @@ export const runAdoptWorktrees = (options: AdoptWorktreesOptions): AdoptWorktree
       items.push({
         path: worktree.path,
         branch: worktree.branch,
-        setup: undefined,
+        bootstrap: undefined,
         opened: false,
         workspaceId: herdrByPath.get(canonicalPath(worktree.path))?.openWorkspaceId,
         error: "checkout is missing",
@@ -650,19 +626,16 @@ export const runAdoptWorktrees = (options: AdoptWorktreesOptions): AdoptWorktree
       continue;
     }
 
-    let setup: WorktreeSetupResult | undefined;
+    let bootstrap: WorktreeBootstrapResult | undefined;
     let error: string | undefined;
     try {
-      setup = runWorktreeSetup({
+      bootstrap = options.bootstrap.run({
         allowCompleted: true,
+        io: undefined,
         mainCheckout,
-        now: options.now,
-        herdrClient: options.herdrClient,
-        runner: options.runner,
-        syncReferences: options.syncReferences,
         worktreePath: worktree.path,
       });
-      error = setup.error;
+      error = bootstrap.error;
     } catch (caught) {
       error = errorMessage(caught);
     }
@@ -678,7 +651,7 @@ export const runAdoptWorktrees = (options: AdoptWorktreesOptions): AdoptWorktree
     items.push({
       path: worktree.path,
       branch: worktree.branch,
-      setup,
+      bootstrap,
       opened,
       workspaceId: herdr?.openWorkspaceId,
       error,
@@ -709,14 +682,14 @@ export const formatAdoptWorktrees = (
     lines.push(`${prefix}No linked worktrees found.`);
   } else {
     for (const item of result.items) {
-      const setupState = item.setup?.state ?? "not-run";
+      const bootstrapState = item.bootstrap?.state ?? "not-run";
       const workspace = item.opened
         ? "opened"
         : item.workspaceId === undefined
           ? "already absent"
           : `open (${item.workspaceId})`;
       const suffix = item.error === undefined ? "" : `: ${item.error}`;
-      lines.push(`${prefix}${item.path} (${setupState}, ${workspace})${suffix}`);
+      lines.push(`${prefix}${item.path} (${bootstrapState}, ${workspace})${suffix}`);
     }
   }
   lines.push(`${prefix}Summary: ${result.items.length} worktrees, exit ${result.exitCode}`);

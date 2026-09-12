@@ -16,8 +16,10 @@ import {
   type RecordingRunner,
 } from "./command-runner.ts";
 import type { HerdrClient, HerdrWorktree } from "./herdr-client.ts";
+import type { WorktreeBootstrap, WorktreeBootstrapInspection } from "./worktree-bootstrap.ts";
 import { runCli, type CliDependencies } from "./cli.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
+import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
 import {
   formatAdoptWorktrees,
   formatProjectGc,
@@ -25,9 +27,9 @@ import {
   runProjectGc,
 } from "./project-gc.ts";
 import { formatProjectUpdate, runProjectUpdate } from "./project-update.ts";
-import { claimWorktreeStatus } from "./worktree-status.ts";
 import { createGitFixture } from "./testing/git-fixture.ts";
 import { spawnGit } from "./testing/git-env.ts";
+import { samePath } from "./workspace.ts";
 
 const created: string[] = [];
 
@@ -53,13 +55,11 @@ const requireGit = (repository: string, args: readonly string[], operation: stri
 const makeProject = (): {
   readonly root: string;
   readonly main: string;
-  readonly worktreeRoot: string;
   readonly merged: string;
   readonly unmerged: string;
   readonly dirty: string;
   readonly open: string;
   readonly missing: string;
-  readonly orphan: string;
   readonly stray: string;
 } => {
   const fixture = createGitFixture({
@@ -74,7 +74,6 @@ const makeProject = (): {
   const dirty = join(worktreeRoot, "dirty");
   const open = join(worktreeRoot, "open");
   const missing = join(worktreeRoot, "missing");
-  const orphan = join(worktreeRoot, "orphan");
   const stray = join(worktreeRoot, "stray");
   mkdirSync(worktreeRoot, { recursive: true });
 
@@ -131,27 +130,12 @@ const makeProject = (): {
   mkdirSync(join(merged, "node_modules"), { recursive: true });
   writeFileSync(join(merged, "target", "artifact.txt"), "target\n");
   writeFileSync(join(merged, "node_modules", "artifact.txt"), "node modules\n");
-  const mergedStatus = claimWorktreeStatus(main, merged, () => "2026-09-08T01:00:00.000Z");
-  if (mergedStatus === undefined) throw new Error("failed to claim merged status");
-  mergedStatus.write("done", undefined, "2026-09-08T01:00:01.000Z");
-  mergedStatus.release();
   mkdirSync(stray, { recursive: true });
   writeFileSync(join(stray, "notes.txt"), "not a worktree\n");
-  mkdirSync(orphan, { recursive: true });
-
-  const orphanStatus = claimWorktreeStatus(main, orphan, () => "2026-09-08T01:00:00.000Z");
-  if (orphanStatus === undefined) throw new Error("failed to claim orphan status");
-  orphanStatus.write("done", undefined, "2026-09-08T01:00:01.000Z");
-  orphanStatus.release();
-  const missingStatus = claimWorktreeStatus(main, missing, () => "2026-09-08T01:00:00.000Z");
-  if (missingStatus === undefined) throw new Error("failed to claim missing status");
-  missingStatus.write("done", undefined, "2026-09-08T01:00:01.000Z");
-  missingStatus.release();
-  rmSync(orphan, { recursive: true, force: true });
   rmSync(missing, { recursive: true, force: true });
 
   created.push(root);
-  return { root, main, worktreeRoot, merged, unmerged, dirty, open, missing, orphan, stray };
+  return { root, main, merged, unmerged, dirty, open, missing, stray };
 };
 
 const herdrWorktrees = (project: ReturnType<typeof makeProject>): readonly HerdrWorktree[] => [
@@ -208,6 +192,32 @@ const gcClient = (
 ): HerdrClient =>
   createFakeHerdrClient({ listWorktrees: () => herdrWorktrees(project), ...overrides });
 
+const bootstrapInspection = (
+  state: WorktreeBootstrapInspection["state"],
+): WorktreeBootstrapInspection => ({
+  state,
+  error: undefined,
+  startedAt: undefined,
+  finishedAt: undefined,
+});
+
+const gcBootstrap = (
+  project: ReturnType<typeof makeProject>,
+  forgotten: string[] = [],
+  running: readonly string[] = [],
+): WorktreeBootstrap =>
+  createFakeWorktreeBootstrap({
+    inspect: ({ worktreePath }) => {
+      if (running.some((path) => samePath(path, worktreePath))) {
+        return bootstrapInspection("running");
+      }
+      if (samePath(worktreePath, project.merged)) return bootstrapInspection("done");
+      if (samePath(worktreePath, project.missing)) return bootstrapInspection("done");
+      return bootstrapInspection("none");
+    },
+    forget: ({ worktreePath }) => forgotten.push(worktreePath),
+  });
+
 const captureOutput = (): {
   readonly stdout: () => string;
   readonly stderr: () => string;
@@ -242,6 +252,7 @@ describe("project gc", () => {
     const runner = gcRunner(project);
 
     const report = runProjectGc({
+      bootstrap: gcBootstrap(project),
       buildDirectories: undefined,
       dryRun: true,
       herdrClient: gcClient(project),
@@ -260,10 +271,9 @@ describe("project gc", () => {
     expect(report.detachedWorkspaces).toEqual([
       { path: resolveMissing(project.missing), workspaceId: "detached-workspace" },
     ]);
-    expect(report.staleStatuses).toHaveLength(2);
+    expect(report.staleStatuses).toHaveLength(1);
     expect(report.staleStatuses.map((status) => status.path)).toEqual([
       resolveMissing(project.missing),
-      resolveMissing(project.orphan),
     ]);
     expect(report.unregisteredDirectories).toEqual([{ path: realpathSync(project.stray) }]);
     expect(report.removable[0]?.buildDirectories).toEqual([
@@ -277,11 +287,33 @@ describe("project gc", () => {
     expect(formatProjectGc(report)).toContain("Dry run: no changes made.");
   });
 
+  it("classifies a live bootstrap as busy through inspect", () => {
+    const project = makeProject();
+    const runner = gcRunner(project);
+    const report = runProjectGc({
+      bootstrap: gcBootstrap(project, [], [project.merged]),
+      buildDirectories: undefined,
+      dryRun: true,
+      herdrClient: gcClient(project),
+      projectPath: project.main,
+      runner,
+    });
+
+    expect(report.busy).toContainEqual(
+      expect.objectContaining({
+        path: realpathSync(project.merged),
+        reason: "bootstrap is running",
+      }),
+    );
+    expect(report.removable).not.toContainEqual(expect.objectContaining({ path: project.merged }));
+  });
+
   it("ignores a false-linked Herdr workspace when classifying a Git worktree", () => {
     const project = makeProject();
     const runner = gcRunner(project);
     const mergedPath = realpathSync(project.merged);
     const report = runProjectGc({
+      bootstrap: gcBootstrap(project),
       buildDirectories: undefined,
       dryRun: true,
       herdrClient: createFakeHerdrClient({
@@ -321,6 +353,7 @@ describe("project gc", () => {
     });
 
     const gc = runProjectGc({
+      bootstrap: gcBootstrap(project),
       buildDirectories: undefined,
       dryRun: true,
       herdrClient: gcClient(project),
@@ -348,8 +381,10 @@ describe("project gc", () => {
     const project = makeProject();
     const runner = gcRunner(project);
     const mergedPath = realpathSync(project.merged);
+    const forgotten: string[] = [];
 
     const report = runProjectGc({
+      bootstrap: gcBootstrap(project, forgotten),
       buildDirectories: undefined,
       dryRun: false,
       herdrClient: gcClient(project),
@@ -360,7 +395,8 @@ describe("project gc", () => {
     expect(report.exitCode).toBe(0);
     expect(report.removed).toEqual([mergedPath]);
     expect(report.closedWorkspaces).toEqual(["detached-workspace"]);
-    expect(report.deletedStatuses).toHaveLength(3);
+    expect(report.deletedStatuses).toHaveLength(2);
+    expect(forgotten).toEqual([mergedPath, resolveMissing(project.missing)]);
     expect(existsSync(project.merged)).toBe(false);
     expect(existsSync(join(project.merged, "target"))).toBe(false);
     expect(existsSync(join(project.merged, "node_modules"))).toBe(false);
@@ -387,6 +423,7 @@ describe("project gc", () => {
     });
 
     const report = runProjectGc({
+      bootstrap: gcBootstrap(project),
       buildDirectories: undefined,
       dryRun: false,
       herdrClient: gcClient(project),
@@ -446,6 +483,13 @@ describe("adopt-worktrees", () => {
     created.push(root);
 
     const openedPaths: string[] = [];
+    const bootstrapRuns: string[] = [];
+    const bootstrap = createFakeWorktreeBootstrap({
+      run: ({ worktreePath }) => {
+        bootstrapRuns.push(worktreePath);
+        return { exitCode: 0, state: "done", error: undefined };
+      },
+    });
     const herdrClient = createFakeHerdrClient({
       listWorktrees: () => [
         {
@@ -476,20 +520,18 @@ describe("adopt-worktrees", () => {
       git: runFixtureGit,
       devenv: result(0),
     });
-    const syncPaths: string[] = [];
     const adopted = runAdoptWorktrees({
+      bootstrap,
       herdrClient,
-      now: () => "2026-09-08T01:00:00.000Z",
       projectPath: main,
       runner,
-      syncReferences: (request) => syncPaths.push(request.worktreePath),
     });
     expect(adopted.exitCode).toBe(0);
     expect(adopted.items.map((item) => [item.path, item.opened, item.workspaceId])).toEqual([
       [realpathSync(first), true, undefined],
       [realpathSync(second), false, "w2"],
     ]);
-    expect(syncPaths).toEqual([realpathSync(first), realpathSync(second)]);
+    expect(bootstrapRuns).toEqual([realpathSync(first), realpathSync(second)]);
     expect(openedPaths).toEqual([realpathSync(first)]);
     expect(formatAdoptWorktrees(adopted)).toContain("Summary: 2 worktrees, exit 0");
   });
@@ -509,17 +551,16 @@ describe("adopt-worktrees", () => {
     });
 
     const adopted = runAdoptWorktrees({
+      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient,
-      now: () => "2026-09-08T01:00:00.000Z",
       projectPath: project.main,
       runner,
-      syncReferences: () => undefined,
     });
     const existing = adopted.items.filter((item) => item.path !== resolveMissing(project.missing));
 
     expect(adopted.exitCode).toBe(1);
     expect(existing).toHaveLength(4);
-    expect(existing.every((item) => item.setup?.state === "done")).toBe(true);
+    expect(existing.every((item) => item.bootstrap?.state === "done")).toBe(true);
     expect(existing.filter((item) => item.error === "workspace service unavailable")).toHaveLength(
       3,
     );
@@ -535,6 +576,7 @@ describe("adopt-worktrees", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient: gcClient(project),
       syncReferences: () => undefined,
       environment: { PROJECT_PLATFORM: "linux" },
@@ -587,6 +629,7 @@ describe("adopt-worktrees", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient,
       syncReferences: () => undefined,
       environment: { PROJECT_PLATFORM: "darwin", PROJECT_PROJECTS_FILE: projectsFile },

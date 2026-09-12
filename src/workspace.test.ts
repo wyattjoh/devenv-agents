@@ -4,7 +4,6 @@ import { join, relative } from "node:path";
 import { CommandFailure, createRecordingRunner, realCommandRunner } from "./command-runner.ts";
 import {
   getManagedWorktreeRoot,
-  getWorktreeStatusRoot,
   listLinkedWorktrees,
   resolveMainCheckout,
   samePath,
@@ -123,14 +122,11 @@ describe("project workspace", () => {
     }
   });
 
-  it("exposes the managed worktree and bootstrap status roots", () => {
+  it("exposes the managed worktree root", () => {
     withGitFixture((fixture) => {
       const mainCheckout = realpathSync(fixture.repository);
 
       expect(getManagedWorktreeRoot(mainCheckout)).toBe(join(mainCheckout, ".claude", "worktrees"));
-      expect(getWorktreeStatusRoot(mainCheckout)).toBe(
-        join(mainCheckout, ".devenv", "state", "project", "worktrees"),
-      );
     });
   });
 

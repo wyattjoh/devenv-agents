@@ -11,6 +11,8 @@ import {
 } from "./cli.ts";
 import { createRecordingRunner, type CommandResult } from "./command-runner.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
+import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
+import { createWorktreeBootstrap } from "./worktree-bootstrap.ts";
 import { createSyncReferences } from "./project-sync.ts";
 
 const created: string[] = [];
@@ -104,6 +106,12 @@ describe("project CLI", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      bootstrap: createWorktreeBootstrap({
+        herdrClient: createFakeHerdrClient(),
+        now: () => "2026-09-08T01:00:00.000Z",
+        runner,
+        syncReferences: () => undefined,
+      }),
       herdrClient: createFakeHerdrClient(),
       syncReferences: () => undefined,
       environment: undefined,
@@ -120,6 +128,83 @@ describe("project CLI", () => {
       ["direnv", "allow"],
       ["devenv", "shell", "--", "true"],
     ]);
+  });
+
+  it("runs interactive setup through the bootstrap interface", () => {
+    const bootstrapCalls: string[] = [];
+    const prompts: string[] = [];
+    const bootstrap = createFakeWorktreeBootstrap({
+      run: (options) => {
+        bootstrapCalls.push(options.worktreePath);
+        prompts.push(options.io?.readLine() ?? "missing");
+        options.io?.onFailure?.({
+          exitCode: 1,
+          state: "failed",
+          error: "warm exploded",
+        });
+        return { exitCode: 0, state: "done", error: undefined };
+      },
+    });
+    const dependencies: CliDependencies = {
+      cwd: "/tmp/fixture-worktree",
+      now: () => "2026-09-08T01:00:00.000Z",
+      readLine: () => "q",
+      runner: createRecordingRunner(),
+      bootstrap,
+      herdrClient: createFakeHerdrClient(),
+      syncReferences: () => undefined,
+      environment: undefined,
+      pluginPath: undefined,
+    };
+    const output = captureOutput();
+
+    expect(runCli(["worktree-setup", "--interactive"], output.io, dependencies)).toBe(0);
+    expect(bootstrapCalls).toEqual(["/tmp/fixture-worktree"]);
+    expect(prompts).toEqual(["q"]);
+    expect(output.stderr()).toBe(
+      "project worktree-setup: warm exploded\nPress Enter to retry or q to quit.\n",
+    );
+  });
+
+  it("runs the worktree event through the bootstrap request via runCli", () => {
+    const root = mkdtempSync(join("/tmp", "devenv-agents-cli-event-"));
+    const mainCheckout = join(root, "main");
+    const worktreePath = join(root, "worktree");
+    mkdirSync(join(mainCheckout, ".agents"), { recursive: true });
+    mkdirSync(worktreePath);
+    writeFileSync(join(mainCheckout, ".agents", "project.toml"), 'session = "fixture"\n');
+    created.push(root);
+
+    const requested: string[] = [];
+    const bootstrap = createFakeWorktreeBootstrap({
+      request: ({ worktreePath: requestedPath }) => {
+        requested.push(requestedPath);
+        return { state: "running", claimed: true, opened: true, error: undefined };
+      },
+    });
+    const runner = createRecordingRunner({
+      [`git -C ${realpathSync(worktreePath)} rev-parse --path-format=absolute --git-common-dir`]:
+        result(0, `${mainCheckout}/.git\n`),
+    });
+    const dependencies: CliDependencies = {
+      cwd: worktreePath,
+      now: () => "2026-09-08T01:00:00.000Z",
+      readLine: () => "q",
+      runner,
+      bootstrap,
+      herdrClient: createFakeHerdrClient(),
+      syncReferences: () => undefined,
+      environment: {
+        HERDR_PLUGIN_EVENT_JSON: JSON.stringify({ worktree: { path: worktreePath } }),
+      },
+      pluginPath: undefined,
+    };
+    const output = captureOutput();
+
+    expect(runCli(["wt", "on-event"], output.io, dependencies)).toBe(0);
+    expect(requested).toEqual([realpathSync(worktreePath)]);
+    expect(output.stdout()).toBe("");
+    expect(output.stderr()).toBe("");
   });
 
   it("dispatches project sync through the injected materializing adapter", () => {
@@ -150,6 +235,7 @@ describe("project CLI", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient: createFakeHerdrClient(),
       syncReferences: createSyncReferences({
         codeRoot: join(home, "code"),
@@ -176,6 +262,7 @@ describe("project CLI", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      bootstrap: createFakeWorktreeBootstrap(),
       herdrClient,
       syncReferences: () => undefined,
       environment: {},
