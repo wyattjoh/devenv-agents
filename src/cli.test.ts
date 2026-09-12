@@ -10,6 +10,7 @@ import {
   type CliIO,
 } from "./cli.ts";
 import { createRecordingRunner, type CommandResult } from "./command-runner.ts";
+import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import { createSyncReferences } from "./project-sync.ts";
 
 const created: string[] = [];
@@ -104,6 +105,7 @@ describe("project CLI", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      herdrClient: createFakeHerdrClient(),
       syncReferences: () => undefined,
       environment: undefined,
       pluginPath: undefined,
@@ -150,6 +152,7 @@ describe("project CLI", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      herdrClient: createFakeHerdrClient(),
       syncReferences: createSyncReferences({
         codeRoot: join(home, "code"),
         platform: "linux",
@@ -167,15 +170,15 @@ describe("project CLI", () => {
     ).toEqual({ permissions: { additionalDirectories: [sibling] } });
   });
 
-  it("dispatches plugin install through the recording runner", () => {
-    const runner = createRecordingRunner({
-      "herdr plugin list --json": result(0, JSON.stringify({ result: { plugins: [] } })),
-    });
+  it("dispatches plugin install through the injected Herdr client", () => {
+    const runner = createRecordingRunner();
+    const herdrClient = createFakeHerdrClient({ listPlugins: () => [] });
     const dependencies: CliDependencies = {
       cwd: undefined,
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      herdrClient,
       syncReferences: () => undefined,
       environment: {},
       pluginPath: new URL("../plugin", import.meta.url).pathname,
@@ -185,5 +188,6 @@ describe("project CLI", () => {
     expect(runCli(["plugin", "install"], output.io, dependencies)).toBe(0);
     expect(output.stdout()).toContain("wyattjoh.project-worktrees: linked\n");
     expect(output.stderr()).toBe("");
+    expect(runner.calls).toEqual([]);
   });
 });

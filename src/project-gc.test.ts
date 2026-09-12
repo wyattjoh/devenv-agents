@@ -16,6 +16,7 @@ import {
   type RecordingRunner,
 } from "./command-runner.ts";
 import { runCli, type CliDependencies } from "./cli.ts";
+import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import {
   formatAdoptWorktrees,
   formatProjectGc,
@@ -501,6 +502,7 @@ describe("adopt-worktrees", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      herdrClient: createFakeHerdrClient(),
       syncReferences: () => undefined,
       environment: { PROJECT_PLATFORM: "linux" },
       pluginPath: undefined,
@@ -546,6 +548,7 @@ describe("adopt-worktrees", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      herdrClient: createFakeHerdrClient(),
       syncReferences: () => undefined,
       environment: { PROJECT_PLATFORM: "darwin", PROJECT_PROJECTS_FILE: projectsFile },
       pluginPath: undefined,

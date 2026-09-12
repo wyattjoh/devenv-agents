@@ -16,6 +16,7 @@ import {
   type RecordingRunner,
 } from "./command-runner.ts";
 import { runCli, type CliDependencies, type CliIO } from "./cli.ts";
+import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import {
   enumerateProjects,
   parseProjectRepository,
@@ -271,6 +272,7 @@ describe("project add", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      herdrClient: createFakeHerdrClient(),
       syncReferences: () => undefined,
       environment: {
         PROJECT_CODE_ROOT: fixture.code,
@@ -310,6 +312,7 @@ describe("project add", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      herdrClient: createFakeHerdrClient(),
       syncReferences: () => undefined,
       environment: {
         PROJECT_CODE_ROOT: fixture.code,
@@ -337,6 +340,7 @@ describe("project add", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      herdrClient: createFakeHerdrClient(),
       syncReferences: () => undefined,
       environment: { PROJECT_PLATFORM: "freebsd", PROJECT_HOME: fixture.home },
       pluginPath: undefined,

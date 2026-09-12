@@ -8,6 +8,7 @@ import {
   type CommandResult,
 } from "./command-runner.ts";
 import { runCli, type CliDependencies } from "./cli.ts";
+import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import { writeProjectsFile, type ProjectRegistration } from "./project-add.ts";
 import { formatProjectUpdate, runProjectUpdate } from "./project-update.ts";
 import { createGitFixture } from "./testing/git-fixture.ts";
@@ -219,6 +220,7 @@ describe("project update", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      herdrClient: createFakeHerdrClient(),
       syncReferences: () => undefined,
       environment: {},
       pluginPath: undefined,
@@ -260,6 +262,7 @@ describe("project update", () => {
       now: () => "2026-09-08T01:00:00.000Z",
       readLine: () => "q",
       runner,
+      herdrClient: createFakeHerdrClient(),
       syncReferences: () => undefined,
       environment: {
         PROJECT_PLATFORM: "darwin",

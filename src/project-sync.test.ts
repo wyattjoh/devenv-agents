@@ -18,6 +18,7 @@ import {
   type CommandResult,
 } from "./command-runner.ts";
 import { runCli, type CliDependencies } from "./cli.ts";
+import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import { readProjectDeclaration, type ProjectDeclaration } from "./project-declaration.ts";
 import {
   createSyncReferences,
@@ -425,6 +426,7 @@ describe("project reference synchronization", () => {
           now: () => "2026-09-08T01:00:00.000Z",
           readLine: () => "q",
           runner: realCommandRunner,
+          herdrClient: createFakeHerdrClient(),
           syncReferences: createSyncReferences({ codeRoot, runner: realCommandRunner }),
           environment: {},
           pluginPath: undefined,

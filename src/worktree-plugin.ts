@@ -7,6 +7,7 @@ import {
   type CommandResult,
   type CommandRunner,
 } from "./command-runner.ts";
+import type { HerdrClient } from "./herdr-client.ts";
 import { PROJECT_DECLARATION_PATH } from "./project-declaration.ts";
 import { claimWorktreeStatus } from "./worktree-status.ts";
 import { canonicalPath, resolveMainCheckout, samePath } from "./workspace.ts";
@@ -59,8 +60,7 @@ export type WorktreeEventResult = {
  */
 export type PluginInstallOptions = {
   readonly pluginPath: string;
-  readonly herdrPath: string | undefined;
-  readonly runner: CommandRunner;
+  readonly herdrClient: HerdrClient;
 };
 
 /**
@@ -375,33 +375,51 @@ const pluginEntriesFromResponse = (stdout: string): readonly ListedPlugin[] => {
   });
 };
 
-/**
- * Verifies that the managed-worktree plugin is linked and enabled in Herdr.
- *
- * @param options Herdr executable and injected command runner.
- * @returns Nothing when the plugin is ready for worktree creation.
- * @throws When Herdr cannot list plugins, returns malformed JSON, or does not
- * list this plugin as enabled.
- */
-export const assertProjectPluginEnabled = (options: {
+type ProjectPluginEntry = {
+  readonly pluginId: string;
+  readonly enabled: boolean;
+};
+
+type LegacyPluginCheckOptions = {
   readonly herdrPath: string | undefined;
   readonly runner: CommandRunner;
-}): void => {
-  const list = runRequiredCommand(
-    options.runner,
-    "herdr plugin list",
-    herdrCommand(options.herdrPath),
-    ["plugin", "list", "--json"],
-  );
+};
 
-  const plugin = pluginEntriesFromResponse(list.stdout).find(
-    (candidate) => candidate.pluginId === PROJECT_PLUGIN_ID,
-  );
+const assertEnabledProjectPlugin = (plugins: readonly ProjectPluginEntry[]): void => {
+  const plugin = plugins.find((candidate) => candidate.pluginId === PROJECT_PLUGIN_ID);
   if (plugin?.enabled !== true) {
     throw new Error(
       `Herdr plugin ${PROJECT_PLUGIN_ID} is not linked and enabled; run 'project plugin install' first`,
     );
   }
+};
+
+/**
+ * Verifies that the managed-worktree plugin is linked and enabled in Herdr.
+ *
+ * The Herdr-client form is used by worktree creation. The legacy runner form
+ * remains temporarily for project add until ticket 08 migrates that caller.
+ *
+ * @param source Herdr client, or legacy Herdr command dependencies.
+ * @returns Nothing when the plugin is ready for worktree creation.
+ * @throws When Herdr cannot list plugins, returns malformed JSON, or does not
+ * list this plugin as enabled.
+ */
+export const assertProjectPluginEnabled = (
+  source: HerdrClient | LegacyPluginCheckOptions,
+): void => {
+  if ("listPlugins" in source) {
+    assertEnabledProjectPlugin(source.listPlugins());
+    return;
+  }
+
+  const list = runRequiredCommand(
+    source.runner,
+    "herdr plugin list",
+    herdrCommand(source.herdrPath),
+    ["plugin", "list", "--json"],
+  );
+  assertEnabledProjectPlugin(pluginEntriesFromResponse(list.stdout));
 };
 
 const pluginRootPath = (plugin: ListedPlugin): string | undefined => {
@@ -423,28 +441,16 @@ const pluginRootMatches = (plugin: ListedPlugin, root: string): boolean => {
  * unlinked and linked again; Herdr 0.9.0 reloads a changed local manifest using
  * exactly that sequence, so no server restart is needed.
  *
- * @param options Plugin root and injected Herdr command dependencies.
+ * @param options Plugin root and injected Herdr client.
  * @returns The action taken and canonical plugin root.
  */
 export const runPluginInstall = (options: PluginInstallOptions): PluginInstallResult => {
   const { root, manifest } = readPluginManifest(options.pluginPath);
-  const list = runRequiredCommand(
-    options.runner,
-    "herdr plugin list",
-    herdrCommand(options.herdrPath),
-    ["plugin", "list", "--json"],
-  );
-
-  const existing = pluginEntriesFromResponse(list.stdout).find(
-    (plugin) => plugin.pluginId === manifest.id,
-  );
+  const existing = options.herdrClient
+    .listPlugins()
+    .find((plugin) => plugin.pluginId === manifest.id);
   if (existing === undefined) {
-    runRequiredCommand(options.runner, "herdr plugin link", herdrCommand(options.herdrPath), [
-      "plugin",
-      "link",
-      root,
-      "--enabled",
-    ]);
+    options.herdrClient.linkPlugin(root);
     return { exitCode: 0, action: "linked", pluginPath: root };
   }
 
@@ -457,25 +463,12 @@ export const runPluginInstall = (options: PluginInstallOptions): PluginInstallRe
   }
 
   if (pluginRootMatches(existing, root) && existing.version === manifest.version) {
-    runRequiredCommand(options.runner, "herdr plugin enable", herdrCommand(options.herdrPath), [
-      "plugin",
-      "enable",
-      manifest.id,
-    ]);
+    options.herdrClient.enablePlugin(manifest.id);
     return { exitCode: 0, action: "enabled", pluginPath: root };
   }
 
-  runRequiredCommand(options.runner, "herdr plugin unlink", herdrCommand(options.herdrPath), [
-    "plugin",
-    "unlink",
-    manifest.id,
-  ]);
-  runRequiredCommand(options.runner, "herdr plugin link", herdrCommand(options.herdrPath), [
-    "plugin",
-    "link",
-    root,
-    "--enabled",
-  ]);
+  options.herdrClient.unlinkPlugin(manifest.id);
+  options.herdrClient.linkPlugin(root);
   return { exitCode: 0, action: "relinked", pluginPath: root };
 };
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { defaultCommandRunner, errorMessage, type CommandRunner } from "./command-runner.ts";
+import { createHerdrClient, type HerdrClient } from "./herdr-client.ts";
 import {
   defaultProjectRoots,
   enumerateProjects,
@@ -91,6 +92,7 @@ export type CliDependencies = {
   readonly now: () => string;
   readonly readLine: (message?: string) => string;
   readonly runner: CommandRunner;
+  readonly herdrClient: HerdrClient;
   readonly syncReferences: SyncReferences;
   /**
    * Environment snapshot used by Herdr commands, or undefined for process.env.
@@ -118,6 +120,7 @@ const defaultDependencies = (): CliDependencies => ({
   now: () => new Date().toISOString(),
   readLine: interactiveLine,
   runner: defaultCommandRunner,
+  herdrClient: createHerdrClient(defaultCommandRunner, process.env.HERDR_BIN_PATH),
   syncReferences: createSyncReferences({ runner: defaultCommandRunner }),
   environment: undefined,
   pluginPath: undefined,
@@ -224,14 +227,13 @@ const runWorktreeCreateCommand = (
     return printUnknown(output, argument ?? "wt");
   }
 
-  const environment = dependencies.environment ?? process.env;
   try {
     const result = runWorktreeCreate({
       base,
       branch,
       cwd: dependencies.cwd ?? process.cwd(),
       focus,
-      herdrPath: environment.HERDR_BIN_PATH,
+      herdrClient: dependencies.herdrClient,
       noFocus,
       runner: dependencies.runner,
       sleep: undefined,
@@ -536,9 +538,8 @@ const runPluginInstallCommand = (output: CliIO, dependencies: CliDependencies): 
   const environment = dependencies.environment ?? process.env;
   try {
     const result = runPluginInstall({
-      herdrPath: environment.HERDR_BIN_PATH,
+      herdrClient: dependencies.herdrClient,
       pluginPath: resolvePluginPath(dependencies.pluginPath, environment),
-      runner: dependencies.runner,
     });
     if (result.action !== "unchanged") {
       output.stdout(`${PROJECT_PLUGIN_ID}: ${result.action}\n`);

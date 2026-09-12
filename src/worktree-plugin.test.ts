@@ -15,6 +15,8 @@ import {
   type CommandResult,
   type RecordingRunner,
 } from "./command-runner.ts";
+import type { HerdrPlugin } from "./herdr-client.ts";
+import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import {
   PROJECT_PLUGIN_ID,
   runPluginInstall,
@@ -35,6 +37,15 @@ const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
 
 const fixture = (name: string): string =>
   readFileSync(new URL(`../fixtures/herdr-0.9.0/${name}`, import.meta.url), "utf8");
+
+const projectPlugin = (overrides: Partial<HerdrPlugin> = {}): HerdrPlugin => ({
+  pluginId: PROJECT_PLUGIN_ID,
+  enabled: true,
+  pluginRoot,
+  manifestPath: join(pluginRoot, "herdr-plugin.toml"),
+  version: "0.1.0",
+  ...overrides,
+});
 
 const makeProject = (): {
   readonly root: string;
@@ -302,76 +313,64 @@ describe("worktree plugin event hook", () => {
 
 describe("plugin install", () => {
   it("links the plugin when the Herdr registry has no matching entry", () => {
-    const runner = createRecordingRunner({
-      "herdr plugin list --json": result(0, JSON.stringify({ result: { plugins: [] } })),
+    const linkedPaths: string[] = [];
+    const herdrClient = createFakeHerdrClient({
+      listPlugins: () => [],
+      linkPlugin: (path) => linkedPaths.push(path),
     });
 
     const install = runPluginInstall({
-      herdrPath: undefined,
+      herdrClient,
       pluginPath: pluginRoot,
-      runner,
     });
 
     expect(install.action).toBe("linked");
-    expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
-      ["herdr", "plugin", "list", "--json"],
-      ["herdr", "plugin", "link", pluginRoot, "--enabled"],
-    ]);
+    expect(linkedPaths).toEqual([pluginRoot]);
   });
 
   it("treats an enabled matching plugin as an idempotent no-op", () => {
-    const listed = JSON.parse(fixture("plugin-list.json")) as {
-      result: { plugins: Record<string, unknown>[] };
-    };
-    listed.result.plugins[0] = {
-      ...listed.result.plugins[0],
-      enabled: true,
-      manifest_path: join(pluginRoot, "herdr-plugin.toml"),
-      plugin_id: PROJECT_PLUGIN_ID,
-      plugin_root: pluginRoot,
-      version: "0.1.0",
-    };
-    const runner = createRecordingRunner({
-      "herdr plugin list --json": result(0, JSON.stringify(listed)),
+    const herdrClient = createFakeHerdrClient({
+      listPlugins: () => [projectPlugin()],
     });
 
     const install = runPluginInstall({
-      herdrPath: undefined,
+      herdrClient,
       pluginPath: pluginRoot,
-      runner,
     });
 
     expect(install.action).toBe("unchanged");
-    expect(runner.calls).toHaveLength(1);
   });
 
-  it("re-links a matching local plugin when its manifest version changed", () => {
-    const listed = JSON.parse(fixture("plugin-list.json")) as {
-      result: { plugins: Record<string, unknown>[] };
-    };
-    listed.result.plugins[0] = {
-      ...listed.result.plugins[0],
-      enabled: true,
-      manifest_path: join(pluginRoot, "herdr-plugin.toml"),
-      plugin_id: PROJECT_PLUGIN_ID,
-      plugin_root: pluginRoot,
-      version: "0.0.9",
-    };
-    const runner = createRecordingRunner({
-      "herdr plugin list --json": result(0, JSON.stringify(listed)),
+  it("enables a matching local plugin when it is disabled", () => {
+    const enabledIds: string[] = [];
+    const herdrClient = createFakeHerdrClient({
+      listPlugins: () => [projectPlugin({ enabled: false })],
+      enablePlugin: (pluginId) => enabledIds.push(pluginId),
     });
 
     const install = runPluginInstall({
-      herdrPath: undefined,
+      herdrClient,
       pluginPath: pluginRoot,
-      runner,
+    });
+
+    expect(install.action).toBe("enabled");
+    expect(enabledIds).toEqual([PROJECT_PLUGIN_ID]);
+  });
+
+  it("re-links a matching local plugin when its manifest version changed", () => {
+    const actions: string[] = [];
+    const herdrClient = createFakeHerdrClient({
+      listPlugins: () => [projectPlugin({ version: "0.0.9" })],
+      unlinkPlugin: (pluginId) => actions.push(`unlink:${pluginId}`),
+      linkPlugin: (path) => actions.push(`link:${path}`),
+    });
+
+    const install = runPluginInstall({
+      herdrClient,
+      pluginPath: pluginRoot,
     });
 
     expect(install.action).toBe("relinked");
-    expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
-      ["herdr", "plugin", "list", "--json"],
-      ["herdr", "plugin", "unlink", PROJECT_PLUGIN_ID],
-      ["herdr", "plugin", "link", pluginRoot, "--enabled"],
-    ]);
+    expect(actions).toEqual([`unlink:${PROJECT_PLUGIN_ID}`, `link:${pluginRoot}`]);
   });
 });
