@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   errorMessage,
   runCommand,
@@ -8,8 +8,8 @@ import {
   type CommandRunner,
 } from "./command-runner.ts";
 import { PROJECT_DECLARATION_PATH } from "./project-declaration.ts";
-import { resolveMainCheckout } from "./worktree-setup.ts";
 import { claimWorktreeStatus } from "./worktree-status.ts";
+import { canonicalPath, resolveMainCheckout, samePath } from "./workspace.ts";
 
 /**
  * The Herdr plugin identifier owned by this repository.
@@ -146,12 +146,11 @@ const workspaceIdFromPayload = (payload: JsonRecord | undefined): string | undef
 
 const herdrCommand = (herdrPath: string | undefined): string => herdrPath ?? "herdr";
 
-const canonicalDirectory = (path: string): string | undefined => {
+const isDirectory = (path: string): boolean => {
   try {
-    const canonical = realpathSync(resolve(path));
-    return statSync(canonical).isDirectory() ? canonical : undefined;
+    return statSync(path).isDirectory();
   } catch {
-    return undefined;
+    return false;
   }
 };
 
@@ -210,12 +209,14 @@ const pathFromWorkspace = (
 const resolveEventWorktreePath = (options: WorktreeEventOptions): string | undefined => {
   const payload = parseEventPayload(options.eventJson);
   const direct = pathFromEventPayload(payload);
-  if (direct !== undefined) return canonicalDirectory(direct);
+  if (direct !== undefined) return isDirectory(direct) ? canonicalPath(direct) : undefined;
 
   const workspaceId = workspaceIdFromPayload(payload) ?? options.workspaceId;
   if (workspaceId === undefined || workspaceId.length === 0) return undefined;
   const listedPath = pathFromWorkspace(workspaceId, options);
-  return listedPath === undefined ? undefined : canonicalDirectory(listedPath);
+  return listedPath === undefined || !isDirectory(listedPath)
+    ? undefined
+    : canonicalPath(listedPath);
 };
 
 const skippedEvent = (
@@ -344,7 +345,7 @@ const readPluginManifest = (
   if (version === undefined || version.length === 0) {
     throw new Error("Herdr plugin manifest requires a version");
   }
-  return { root: realpathSync(root), manifest: { id, version } };
+  return { root: canonicalPath(root), manifest: { id, version } };
 };
 
 const pluginEntriesFromResponse = (stdout: string): readonly ListedPlugin[] => {
@@ -403,16 +404,15 @@ export const assertProjectPluginEnabled = (options: {
   }
 };
 
-const comparablePluginRoot = (plugin: ListedPlugin): string | undefined => {
+const pluginRootPath = (plugin: ListedPlugin): string | undefined => {
   const path = plugin.pluginRoot ?? plugin.manifestPath;
   if (path === undefined) return undefined;
-  try {
-    const canonical = realpathSync(path);
-    return canonical.endsWith(`/${PROJECT_PLUGIN_MANIFEST}`) ? dirname(canonical) : canonical;
-  } catch {
-    const resolved = resolve(path);
-    return resolved.endsWith(`/${PROJECT_PLUGIN_MANIFEST}`) ? dirname(resolved) : resolved;
-  }
+  return basename(path) === PROJECT_PLUGIN_MANIFEST ? dirname(path) : path;
+};
+
+const pluginRootMatches = (plugin: ListedPlugin, root: string): boolean => {
+  const path = pluginRootPath(plugin);
+  return path !== undefined && samePath(path, root);
 };
 
 /**
@@ -449,14 +449,14 @@ export const runPluginInstall = (options: PluginInstallOptions): PluginInstallRe
   }
 
   if (
-    comparablePluginRoot(existing) === root &&
+    pluginRootMatches(existing, root) &&
     existing.version === manifest.version &&
     existing.enabled
   ) {
     return { exitCode: 0, action: "unchanged", pluginPath: root };
   }
 
-  if (comparablePluginRoot(existing) === root && existing.version === manifest.version) {
+  if (pluginRootMatches(existing, root) && existing.version === manifest.version) {
     runRequiredCommand(options.runner, "herdr plugin enable", herdrCommand(options.herdrPath), [
       "plugin",
       "enable",

@@ -6,7 +6,7 @@ import {
   readWorktreeStatus,
   type WorktreeStatus,
 } from "./worktree-status.ts";
-import { resolveMainCheckout } from "./worktree-setup.ts";
+import { getManagedWorktreeRoot, resolveMainCheckout, worktreeLabel } from "./workspace.ts";
 
 /**
  * The ids returned by Herdr after creating a workspace and its root pane.
@@ -86,15 +86,9 @@ const parseCreateResponse = (stdout: string): ParsedCreateResponse => {
   return { workspaceId, rootPaneId };
 };
 
-const worktreeLabel = (branch: string): string => {
-  const label = branch.slice(branch.lastIndexOf("/") + 1);
-  if (label.length === 0) throw new Error("worktree branch must end with a name");
-  return label;
-};
-
 const worktreePathForBranch = (mainCheckout: string, branch: string): string => {
   if (branch.length === 0) throw new Error("worktree branch is required");
-  const root = resolve(mainCheckout, ".claude", "worktrees");
+  const root = getManagedWorktreeRoot(mainCheckout);
   const path = resolve(root, branch);
   const relativePath = relative(root, path);
   if (relativePath.length === 0 || relativePath === ".." || relativePath.startsWith(`..${sep}`)) {

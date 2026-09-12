@@ -21,12 +21,12 @@ import {
   readWorktreeStatus,
 } from "./worktree-status.ts";
 import {
-  resolveMainCheckout,
   runInteractiveWorktreeSetup,
   runWorktreeSetup,
   type SyncReferences,
   type WorktreeSetupOptions,
 } from "./worktree-setup.ts";
+import { resolveMainCheckout } from "./workspace.ts";
 
 const created: string[] = [];
 

@@ -4,12 +4,12 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
+import { canonicalPath, getWorktreeStatusRoot } from "./workspace.ts";
 
 /**
  * The states persisted for one managed worktree bootstrap.
@@ -113,8 +113,6 @@ const SETUP_HANDOFF = ".setup-handoff";
 const SETUP_OWNER = ".setup-owner";
 const SETUP_CANCELLED = ".setup-cancelled";
 
-const canonicalPath = (path: string): string => realpathSync(resolve(path));
-
 /**
  * Returns the status-directory hash for an already canonical worktree path.
  *
@@ -157,15 +155,6 @@ const writeJsonAtomically = (path: string, value: WorktreeStatus): void => {
   writeFileSync(temporaryPath, `${JSON.stringify(value)}\n`, "utf8");
   renameSync(temporaryPath, path);
 };
-
-/**
- * Resolves the canonical root containing all worktree status entries.
- *
- * @param mainCheckout Canonical main checkout containing `.devenv/state`.
- * @returns The shared status root for the project.
- */
-const getWorktreeStatusRoot = (mainCheckout: string): string =>
-  join(canonicalPath(mainCheckout), ".devenv", "state", "project", "worktrees");
 
 /**
  * Resolves the canonical status and claim paths for a worktree.

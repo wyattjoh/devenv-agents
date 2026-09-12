@@ -16,7 +16,7 @@ import {
   type CommandRunner,
 } from "./command-runner.ts";
 import { readProjectDeclaration, type ProjectDeclaration } from "./project-declaration.ts";
-import { resolveMainCheckout } from "./worktree-setup.ts";
+import { resolveMainCheckout } from "./workspace.ts";
 import type { SyncReferences, SyncRequest } from "./worktree-setup.ts";
 
 /** The local Claude settings file populated by tree grants. */

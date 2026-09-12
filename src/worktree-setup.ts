@@ -1,21 +1,14 @@
-import {
-  existsSync,
-  lstatSync,
-  readlinkSync,
-  realpathSync,
-  symlinkSync,
-  unlinkSync,
-} from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { existsSync, lstatSync, readlinkSync, symlinkSync, unlinkSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import {
   errorMessage,
   runCommand,
   runRequiredCommand,
-  runRequiredGitCommand,
   type CommandRunner,
   type CommandResult,
 } from "./command-runner.ts";
 import { readProjectDeclaration, type ProjectDeclaration } from "./project-declaration.ts";
+import { resolveMainCheckout, samePath } from "./workspace.ts";
 import {
   claimWorktreeStatus,
   getWorktreeStatusPaths,
@@ -71,43 +64,8 @@ export type WorktreeSetupResult = {
   readonly error: string | undefined;
 };
 
-/**
- * Resolves the main checkout from Git's shared common directory.
- *
- * @param worktreePath Worktree from which Git should resolve the common directory.
- * @param runner Injected command runner.
- * @returns The canonical main checkout path.
- */
-export const resolveMainCheckout = (worktreePath: string, runner: CommandRunner): string => {
-  const result = runRequiredGitCommand(
-    runner,
-    "git rev-parse --git-common-dir",
-    ["-C", worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-    worktreePath,
-  );
-  const commonDirectory = result.stdout.trim();
-  if (commonDirectory.length === 0) {
-    throw new Error("git rev-parse --git-common-dir returned an empty path");
-  }
-  const absoluteCommonDirectory = isAbsolute(commonDirectory)
-    ? commonDirectory
-    : resolve(worktreePath, commonDirectory);
-  return realpathSync(dirname(absoluteCommonDirectory));
-};
-
 const hasDevenvFile = (worktreePath: string): boolean =>
   ["devenv.nix", "devenv.yaml", "devenv.yml"].some((file) => existsSync(join(worktreePath, file)));
-
-const canonicalComparablePath = (path: string): string => {
-  try {
-    return realpathSync(path);
-  } catch {
-    return resolve(path);
-  }
-};
-
-const samePath = (left: string, right: string): boolean =>
-  canonicalComparablePath(left) === canonicalComparablePath(right);
 
 const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
   error instanceof Error && "code" in error;
