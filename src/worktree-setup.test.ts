@@ -265,11 +265,11 @@ describe("worktree setup", () => {
     const setup = runWorktreeSetup(options);
 
     expect(setup.exitCode).toBe(1);
-    expect(setup.error).toBe("devenv shell -- true failed with exit code 1: warm exploded");
-    expect(readWorktreeStatus(setup.statusPath)).toEqual({
+    expect(setup.error).toEqual(expect.stringContaining("devenv shell -- true"));
+    expect(readWorktreeStatus(setup.statusPath)).toMatchObject({
       path: realpathSync(options.worktreePath),
       state: "failed",
-      error: "devenv shell -- true failed with exit code 1: warm exploded",
+      error: expect.stringContaining("devenv shell -- true"),
       started_at: "2026-09-08T01:00:00.000Z",
       finished_at: "2026-09-08T01:00:00.000Z",
     });

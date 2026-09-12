@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { defaultCommandRunner, type CommandRunner } from "./command-runner.ts";
+import { defaultCommandRunner, errorMessage, type CommandRunner } from "./command-runner.ts";
 import {
   defaultProjectRoots,
   enumerateProjects,
@@ -158,7 +158,7 @@ const runWorktreeSetupCommand = (
     if (result.exitCode !== 0 && !interactive) reportFailure(result);
     return result.exitCode;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     output.stderr(`${PROJECT_NAME} worktree-setup: ${message}\n`);
     return 1;
   }
@@ -239,7 +239,7 @@ const runWorktreeCreateCommand = (
     output.stdout(worktreeCreateOutput(result, json));
     return 0;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     output.stderr(`${PROJECT_NAME} wt create: ${message}\n`);
     return 1;
   }
@@ -302,14 +302,14 @@ const runProjectUpdateCommand = (
         output.stdout(formatProjectUpdate(result, project.repo));
         if (result.exitCode !== 0) exitCode = 1;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorMessage(error);
         output.stderr(`[${project.repo}] ${PROJECT_NAME} update: ${message}\n`);
         exitCode = 1;
       }
     }
     return exitCode;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     output.stderr(`${PROJECT_NAME} update: ${message}\n`);
     return 1;
   }
@@ -368,14 +368,14 @@ const runProjectGcCommand = (
         output.stdout(formatProjectGc(result, project.repo));
         if (result.exitCode !== 0) exitCode = 1;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorMessage(error);
         output.stderr(`[${project.repo}] ${PROJECT_NAME} gc: ${message}\n`);
         exitCode = 1;
       }
     }
     return exitCode;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     output.stderr(`${PROJECT_NAME} gc: ${message}\n`);
     return 1;
   }
@@ -429,14 +429,14 @@ const runAdoptWorktreesCommand = (
         output.stdout(formatAdoptWorktrees(result, project.repo));
         if (result.exitCode !== 0) exitCode = 1;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorMessage(error);
         output.stderr(`[${project.repo}] ${PROJECT_NAME} adopt-worktrees: ${message}\n`);
         exitCode = 1;
       }
     }
     return exitCode;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     output.stderr(`${PROJECT_NAME} adopt-worktrees: ${message}\n`);
     return 1;
   }
@@ -511,7 +511,7 @@ const runProjectAddCommand = (
     output.stdout(result.instructions);
     return 0;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     output.stderr(`${PROJECT_NAME} add: ${message}\n`);
     return 1;
   }
@@ -526,7 +526,7 @@ const runSyncCommand = (output: CliIO, dependencies: CliDependencies): number =>
     });
     return 0;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     output.stderr(`${PROJECT_NAME} sync: ${message}\n`);
     return 1;
   }
@@ -545,7 +545,7 @@ const runPluginInstallCommand = (output: CliIO, dependencies: CliDependencies): 
     }
     return result.exitCode;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     output.stderr(`${PROJECT_NAME} plugin install: ${message}\n`);
     return 1;
   }

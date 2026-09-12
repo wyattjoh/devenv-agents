@@ -1,9 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import {
+  CommandFailure,
   createRecordingRunner,
   defaultCommandRunner,
+  errorMessage,
   runCommand,
-  runGitCommand,
+  runRequiredCommand,
+  runRequiredGitCommand,
   type CommandResult,
 } from "./command-runner.ts";
 
@@ -91,17 +94,59 @@ describe("command runner", () => {
     expect(response.stderr).toBe("");
   });
 
-  it("sanitizes Git repository variables at the injected boundary", () => {
+  it("reports required-command failures with one typed format and detail preference", () => {
+    const cases = [
+      { stdout: "stdout detail", stderr: "stderr detail", detail: "stderr detail" },
+      { stdout: "stdout detail", stderr: "  \n", detail: "stdout detail" },
+      { stdout: "  \n", stderr: "  \n", detail: "no output" },
+    ];
+
+    for (const { stdout, stderr, detail } of cases) {
+      const runner = createRecordingRunner({
+        "devenv shell -- true": { exitCode: 7, stdout, stderr },
+      });
+      let caught: unknown;
+      try {
+        runRequiredCommand(runner, "devenv shell -- true", "devenv", ["shell", "--", "true"], {
+          cwd: "/tmp/project",
+          env: undefined,
+        });
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toBeInstanceOf(CommandFailure);
+      const failure = caught as CommandFailure;
+      expect(failure.label).toBe("devenv shell -- true");
+      expect(failure.exitCode).toBe(7);
+      expect(failure.result).toEqual({ exitCode: 7, stdout, stderr });
+      expect(failure.message).toBe(`devenv shell -- true failed with exit code 7: ${detail}`);
+    }
+  });
+
+  it("sanitizes Git repository variables for required Git calls", () => {
     const runner = createRecordingRunner({ git: result("git response") });
 
     expect(
-      runGitCommand(runner, ["rev-parse", "--git-common-dir"], "/tmp/project", {
-        GIT_DIR: "/tmp/decoy/.git",
-        GIT_WORK_TREE: "/tmp/decoy",
-        KEEP: "yes",
-      }),
+      runRequiredGitCommand(
+        runner,
+        "git rev-parse --git-common-dir",
+        ["rev-parse", "--git-common-dir"],
+        "/tmp/project",
+        {
+          GIT_DIR: "/tmp/decoy/.git",
+          GIT_WORK_TREE: "/tmp/decoy",
+          KEEP: "yes",
+        },
+      ),
     ).toEqual(result("git response"));
     expect(runner.calls[0]?.env).toEqual({ KEEP: "yes" });
+  });
+
+  it("converts Error and non-Error values to messages", () => {
+    expect(errorMessage(new Error("error message"))).toBe("error message");
+    expect(errorMessage("string failure")).toBe("string failure");
+    expect(errorMessage(42)).toBe("42");
   });
 
   it("returns a successful empty response for an unconfigured recording call", () => {

@@ -8,8 +8,10 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
+  errorMessage,
   runCommand,
-  runGitCommand,
+  runRequiredCommand,
+  runRequiredGitCommand,
   type CommandRunner,
   type CommandResult,
 } from "./command-runner.ts";
@@ -77,14 +79,12 @@ export type WorktreeSetupResult = {
  * @returns The canonical main checkout path.
  */
 export const resolveMainCheckout = (worktreePath: string, runner: CommandRunner): string => {
-  const result = runGitCommand(
+  const result = runRequiredGitCommand(
     runner,
+    "git rev-parse --git-common-dir",
     ["-C", worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir"],
     worktreePath,
   );
-  if (result.exitCode !== 0) {
-    throw commandFailure("git rev-parse --git-common-dir", result);
-  }
   const commonDirectory = result.stdout.trim();
   if (commonDirectory.length === 0) {
     throw new Error("git rev-parse --git-common-dir returned an empty path");
@@ -93,22 +93,6 @@ export const resolveMainCheckout = (worktreePath: string, runner: CommandRunner)
     ? commonDirectory
     : resolve(worktreePath, commonDirectory);
   return realpathSync(dirname(absoluteCommonDirectory));
-};
-
-const commandFailure = (label: string, result: CommandResult): Error => {
-  const detail = result.stderr.trim() || result.stdout.trim() || "no output";
-  return new Error(`${label} failed with exit code ${result.exitCode}: ${detail}`);
-};
-
-const runRequiredCommand = (
-  runner: CommandRunner,
-  command: string,
-  args: readonly string[],
-  label: string,
-  cwd: string,
-): void => {
-  const result = runCommand(runner, command, args, { cwd, env: undefined });
-  if (result.exitCode !== 0) throw commandFailure(label, result);
 };
 
 const hasDevenvFile = (worktreePath: string): boolean =>
@@ -197,9 +181,6 @@ const wakeRootPane = (runner: CommandRunner, worktreePath: string): void => {
   }
 };
 
-const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
-
 const resultFromStatus = (
   statusPath: string,
   claimPath: string,
@@ -247,18 +228,21 @@ export const runWorktreeSetup = (options: WorktreeSetupOptions): WorktreeSetupRe
     claim.write("running", undefined, undefined);
     const declaration = readProjectDeclaration(mainCheckout);
     if (hasDevenvFile(options.worktreePath)) {
-      runRequiredCommand(options.runner, "devenv", ["allow"], "devenv allow", options.worktreePath);
+      runRequiredCommand(options.runner, "devenv allow", "devenv", ["allow"], {
+        cwd: options.worktreePath,
+        env: undefined,
+      });
     }
-    runRequiredCommand(options.runner, "direnv", ["allow"], "direnv allow", options.worktreePath);
+    runRequiredCommand(options.runner, "direnv allow", "direnv", ["allow"], {
+      cwd: options.worktreePath,
+      env: undefined,
+    });
     linkLocalLayer(mainCheckout, options.worktreePath);
     // Warm the profile without opening an interactive nested shell.
-    runRequiredCommand(
-      options.runner,
-      "devenv",
-      ["shell", "--", "true"],
-      "devenv shell -- true",
-      options.worktreePath,
-    );
+    runRequiredCommand(options.runner, "devenv shell -- true", "devenv", ["shell", "--", "true"], {
+      cwd: options.worktreePath,
+      env: undefined,
+    });
     options.syncReferences({
       projectRoot: mainCheckout,
       worktreePath: options.worktreePath,

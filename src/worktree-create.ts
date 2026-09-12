@@ -1,5 +1,5 @@
 import { relative, resolve, sep } from "node:path";
-import { runCommand, type CommandResult, type CommandRunner } from "./command-runner.ts";
+import { runRequiredCommand, type CommandRunner } from "./command-runner.ts";
 import { assertProjectPluginEnabled } from "./worktree-plugin.ts";
 import {
   getWorktreeStatusPaths,
@@ -59,11 +59,6 @@ const readRecord = (record: JsonRecord, key: string): JsonRecord | undefined => 
 const readString = (record: JsonRecord | undefined, key: string): string | undefined => {
   const value = record?.[key];
   return typeof value === "string" ? value : undefined;
-};
-
-const commandFailure = (label: string, result: CommandResult): Error => {
-  const detail = result.stderr.trim() || result.stdout.trim() || "no output";
-  return new Error(`${label} failed with exit code ${result.exitCode}: ${detail}`);
 };
 
 const defaultSleep = (): void => {
@@ -161,8 +156,9 @@ export const runWorktreeCreate = (options: WorktreeCreateOptions): WorktreeCreat
   assertProjectPluginEnabled({ herdrPath: options.herdrPath, runner: options.runner });
   const mainCheckout = resolveMainCheckout(options.cwd, options.runner);
   const worktreePath = worktreePathForBranch(mainCheckout, options.branch);
-  const create = runCommand(
+  const create = runRequiredCommand(
     options.runner,
+    "herdr worktree create",
     herdrCommand(options.herdrPath),
     worktreeCreateArgs(
       mainCheckout,
@@ -174,7 +170,6 @@ export const runWorktreeCreate = (options: WorktreeCreateOptions): WorktreeCreat
     ),
     { cwd: mainCheckout, env: undefined },
   );
-  if (create.exitCode !== 0) throw commandFailure("herdr worktree create", create);
 
   const ids = parseCreateResponse(create.stdout);
   const statusPath = getWorktreeStatusPaths(mainCheckout, worktreePath).statusPath;

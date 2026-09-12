@@ -20,6 +20,41 @@ export type CommandResult = {
 };
 
 /**
+ * A required external command that exited unsuccessfully.
+ */
+export class CommandFailure extends Error {
+  /**
+   * The label assigned to the failed operation.
+   */
+  readonly label: string;
+
+  /**
+   * The non-zero exit code returned by the command.
+   */
+  readonly exitCode: number;
+
+  /**
+   * The complete captured result returned by the command runner.
+   */
+  readonly result: CommandResult;
+
+  /**
+   * Creates a typed failure from a command result.
+   *
+   * @param label Human-readable operation label.
+   * @param result Captured result from the failed command.
+   */
+  constructor(label: string, result: CommandResult) {
+    const detail = result.stderr.trim() || result.stdout.trim() || "no output";
+    super(`${label} failed with exit code ${result.exitCode}: ${detail}`);
+    this.name = "CommandFailure";
+    this.label = label;
+    this.exitCode = result.exitCode;
+    this.result = result;
+  }
+}
+
+/**
  * The command and process settings supplied to a command runner.
  */
 export type CommandInvocation = {
@@ -111,6 +146,61 @@ export const runCommand = (
     args: [...args],
     cwd: options?.cwd,
     env: options?.env,
+  });
+
+/**
+ * Converts an unknown thrown value into its display message.
+ *
+ * @param error Value thrown by an operation.
+ * @returns The Error message or the string representation of the value.
+ */
+export const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/**
+ * Runs one command and throws when it exits unsuccessfully.
+ *
+ * @param runner Runner implementation, real or recording.
+ * @param label Human-readable operation label used in failures.
+ * @param command Executable name or path.
+ * @param args Arguments passed to the executable.
+ * @param options Optional working directory and environment overrides.
+ * @returns The runner's captured command result when it succeeds.
+ * @throws {@link CommandFailure} When the command exits with a non-zero code.
+ */
+export const runRequiredCommand = (
+  runner: CommandRunner,
+  label: string,
+  command: string,
+  args: readonly string[],
+  options: CommandOptions | undefined = undefined,
+): CommandResult => {
+  const result = runCommand(runner, command, args, options);
+  if (result.exitCode !== 0) throw new CommandFailure(label, result);
+  return result;
+};
+
+/**
+ * Runs Git and throws when it exits unsuccessfully, sanitizing repository variables.
+ *
+ * @param runner Runner implementation, real or recording.
+ * @param label Human-readable operation label used in failures.
+ * @param args Arguments passed after the `git` executable.
+ * @param cwd Working directory for Git, or undefined to inherit the caller's directory.
+ * @param env Base environment to sanitize, or undefined to use the current process.
+ * @returns Git's captured result when it succeeds.
+ * @throws {@link CommandFailure} When Git exits with a non-zero code.
+ */
+export const runRequiredGitCommand = (
+  runner: CommandRunner,
+  label: string,
+  args: readonly string[],
+  cwd: string | undefined = undefined,
+  env: Readonly<Record<string, string | undefined>> | undefined = undefined,
+): CommandResult =>
+  runRequiredCommand(runner, label, "git", args, {
+    cwd,
+    env: cleanGitEnv(env ?? process.env),
   });
 
 /**

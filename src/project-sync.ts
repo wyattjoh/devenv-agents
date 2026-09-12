@@ -11,8 +11,8 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   defaultCommandRunner,
-  runCommand,
-  type CommandResult,
+  errorMessage,
+  runRequiredCommand,
   type CommandRunner,
 } from "./command-runner.ts";
 import { readProjectDeclaration, type ProjectDeclaration } from "./project-declaration.ts";
@@ -120,14 +120,6 @@ const readRecord = (record: JsonRecord | undefined, key: string): JsonRecord | u
   const value = record?.[key];
   return isRecord(value) ? value : undefined;
 };
-
-const commandFailure = (label: string, result: CommandResult): Error => {
-  const detail = result.stderr.trim() || result.stdout.trim() || "no output";
-  return new Error(`${label} failed with exit code ${result.exitCode}: ${detail}`);
-};
-
-const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
 
 const ensureParent = (path: string): void => {
   mkdirSync(dirname(path), { recursive: true });
@@ -547,11 +539,13 @@ const endpointFromProcess = (
 };
 
 const evaluateProcessOutput = (projectRoot: string, runner: CommandRunner): JsonRecord => {
-  const result = runCommand(runner, "devenv", ["eval", "processes"], {
-    cwd: projectRoot,
-    env: undefined,
-  });
-  if (result.exitCode !== 0) throw commandFailure("devenv eval processes", result);
+  const result = runRequiredCommand(
+    runner,
+    "devenv eval processes",
+    "devenv",
+    ["eval", "processes"],
+    { cwd: projectRoot, env: undefined },
+  );
   return parseJsonOutput(result.stdout);
 };
 

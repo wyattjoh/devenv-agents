@@ -1,9 +1,10 @@
 import { existsSync, lstatSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
-  runCommand,
+  errorMessage,
+  runRequiredCommand,
+  runRequiredGitCommand,
   runGitCommand,
-  type CommandResult,
   type CommandRunner,
 } from "./command-runner.ts";
 import {
@@ -195,14 +196,6 @@ const readRecord = (record: JsonRecord, key: string): JsonRecord | undefined => 
   return isRecord(value) ? value : undefined;
 };
 
-const commandFailure = (label: string, result: CommandResult): Error => {
-  const detail = result.stderr.trim() || result.stdout.trim() || "no output";
-  return new Error(`${label} failed with exit code ${result.exitCode}: ${detail}`);
-};
-
-const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
-
 const comparablePath = (path: string): string => {
   const absolute = resolve(path);
   try {
@@ -292,22 +285,22 @@ const listGitWorktrees = (
   mainCheckout: string,
   runner: CommandRunner,
 ): readonly ProjectGitWorktree[] => {
-  const result = runGitCommand(
+  const result = runRequiredGitCommand(
     runner,
+    "git worktree list",
     ["-C", mainCheckout, "worktree", "list", "--porcelain"],
     mainCheckout,
   );
-  if (result.exitCode !== 0) throw commandFailure("git worktree list", result);
   return parseProjectGitWorktrees(result.stdout, mainCheckout);
 };
 
 const currentBranch = (mainCheckout: string, runner: CommandRunner): string => {
-  const result = runGitCommand(
+  const result = runRequiredGitCommand(
     runner,
+    "git symbolic-ref --short HEAD",
     ["-C", mainCheckout, "symbolic-ref", "--short", "HEAD"],
     mainCheckout,
   );
-  if (result.exitCode !== 0) throw commandFailure("git symbolic-ref --short HEAD", result);
   const branch = result.stdout.trim();
   if (branch.length === 0) throw new Error("main checkout is in a detached HEAD state");
   return branch;
@@ -345,11 +338,13 @@ const listHerdrWorktrees = (
   options: Pick<ProjectGcOptions, "herdrPath" | "runner">,
   mainCheckout: string,
 ): readonly ProjectHerdrWorktree[] => {
-  const result = runCommand(options.runner, herdrCommand(options.herdrPath), ["worktree", "list"], {
-    cwd: mainCheckout,
-    env: undefined,
-  });
-  if (result.exitCode !== 0) throw commandFailure("herdr worktree list", result);
+  const result = runRequiredCommand(
+    options.runner,
+    "herdr worktree list",
+    herdrCommand(options.herdrPath),
+    ["worktree", "list"],
+    { cwd: mainCheckout, env: undefined },
+  );
   return parseHerdrWorktrees(result.stdout);
 };
 
@@ -500,12 +495,12 @@ export const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): Projec
       continue;
     }
 
-    const statusResult = runGitCommand(
+    const statusResult = runRequiredGitCommand(
       options.runner,
+      "git status --porcelain",
       ["-C", worktree.path, "status", "--porcelain"],
       worktree.path,
     );
-    if (statusResult.exitCode !== 0) throw commandFailure("git status --porcelain", statusResult);
     if (statusResult.stdout.trim().length > 0) {
       busy.push({
         path: worktree.path,
@@ -600,13 +595,13 @@ const applyProjectGc = (
 
   for (const detached of plan.detachedWorkspaces) {
     try {
-      const result = runCommand(
+      runRequiredCommand(
         options.runner,
+        "herdr workspace close",
         herdrCommand(options.herdrPath),
         ["workspace", "close", detached.workspaceId],
         { cwd: plan.mainCheckout, env: undefined },
       );
-      if (result.exitCode !== 0) throw commandFailure("herdr workspace close", result);
       closedWorkspaces.push(detached.workspaceId);
     } catch (error) {
       failures.push(cleanupFailure("close workspace", detached.path, error));
@@ -615,12 +610,12 @@ const applyProjectGc = (
 
   for (const worktree of plan.removable) {
     try {
-      const result = runGitCommand(
+      runRequiredGitCommand(
         options.runner,
+        "git worktree remove",
         ["-C", plan.mainCheckout, "worktree", "remove", worktree.path],
         plan.mainCheckout,
       );
-      if (result.exitCode !== 0) throw commandFailure("git worktree remove", result);
       removed.push(worktree.path);
     } catch (error) {
       failures.push(cleanupFailure("remove worktree", worktree.path, error));
@@ -775,8 +770,9 @@ const openWorktree = (
   worktree: ProjectGitWorktree,
 ): { readonly opened: boolean; readonly error: string | undefined } => {
   try {
-    const result = runCommand(
+    runRequiredCommand(
       options.runner,
+      "herdr worktree open",
       herdrCommand(options.herdrPath),
       [
         "worktree",
@@ -791,11 +787,7 @@ const openWorktree = (
       ],
       { cwd: mainCheckout, env: undefined },
     );
-    if (result.exitCode === 0) return { opened: true, error: undefined };
-    return {
-      opened: false,
-      error: commandFailure("herdr worktree open", result).message,
-    };
+    return { opened: true, error: undefined };
   } catch (error) {
     return { opened: false, error: errorMessage(error) };
   }

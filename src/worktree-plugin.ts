@@ -1,6 +1,12 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { runCommand, type CommandResult, type CommandRunner } from "./command-runner.ts";
+import {
+  errorMessage,
+  runCommand,
+  runRequiredCommand,
+  type CommandResult,
+  type CommandRunner,
+} from "./command-runner.ts";
 import { PROJECT_DECLARATION_PATH } from "./project-declaration.ts";
 import { resolveMainCheckout } from "./worktree-setup.ts";
 import { claimWorktreeStatus } from "./worktree-status.ts";
@@ -138,11 +144,6 @@ const workspaceIdFromPayload = (payload: JsonRecord | undefined): string | undef
   return candidates.find((candidate): candidate is string => candidate !== undefined);
 };
 
-const commandFailure = (label: string, result: CommandResult): Error => {
-  const detail = result.stderr.trim() || result.stdout.trim() || "no output";
-  return new Error(`${label} failed with exit code ${result.exitCode}: ${detail}`);
-};
-
 const herdrCommand = (herdrPath: string | undefined): string => herdrPath ?? "herdr";
 
 const canonicalDirectory = (path: string): string | undefined => {
@@ -272,7 +273,7 @@ export const runWorktreeEvent = (options: WorktreeEventOptions): WorktreeEventRe
 
     claim.write("running", undefined, undefined);
     claim.handoff();
-    const openResult = runCommand(options.runner, herdrCommand(options.herdrPath), [
+    runRequiredCommand(options.runner, "herdr plugin pane open", herdrCommand(options.herdrPath), [
       "plugin",
       "pane",
       "open",
@@ -286,7 +287,6 @@ export const runWorktreeEvent = (options: WorktreeEventOptions): WorktreeEventRe
       worktreePath,
       "--no-focus",
     ]);
-    if (openResult.exitCode !== 0) throw commandFailure("herdr plugin pane open", openResult);
 
     return {
       exitCode: 0,
@@ -297,7 +297,7 @@ export const runWorktreeEvent = (options: WorktreeEventOptions): WorktreeEventRe
       error: undefined,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     let ownsClaim = false;
     try {
       ownsClaim = claim?.cancelHandoff() ?? false;
@@ -340,10 +340,12 @@ const readPluginManifest = (
   try {
     parsed = Bun.TOML.parse(readFileSync(manifestPath, "utf8")) as unknown;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Unable to parse Herdr plugin manifest ${manifestPath}: ${message}`, {
-      cause: error,
-    });
+    throw new Error(
+      `Unable to parse Herdr plugin manifest ${manifestPath}: ${errorMessage(error)}`,
+      {
+        cause: error,
+      },
+    );
   }
   if (!isRecord(parsed)) throw new Error("Herdr plugin manifest must be a TOML table");
   const id = readString(parsed, "id");
@@ -396,12 +398,12 @@ export const assertProjectPluginEnabled = (options: {
   readonly herdrPath: string | undefined;
   readonly runner: CommandRunner;
 }): void => {
-  const list = runCommand(options.runner, herdrCommand(options.herdrPath), [
-    "plugin",
-    "list",
-    "--json",
-  ]);
-  if (list.exitCode !== 0) throw commandFailure("herdr plugin list", list);
+  const list = runRequiredCommand(
+    options.runner,
+    "herdr plugin list",
+    herdrCommand(options.herdrPath),
+    ["plugin", "list", "--json"],
+  );
 
   const plugin = pluginEntriesFromResponse(list.stdout).find(
     (candidate) => candidate.pluginId === PROJECT_PLUGIN_ID,
@@ -425,15 +427,6 @@ const comparablePluginRoot = (plugin: ListedPlugin): string | undefined => {
   }
 };
 
-const runRequiredHerdr = (
-  options: PluginInstallOptions,
-  args: readonly string[],
-  label: string,
-): void => {
-  const result = runCommand(options.runner, herdrCommand(options.herdrPath), args);
-  if (result.exitCode !== 0) throw commandFailure(label, result);
-};
-
 /**
  * Links or refreshes this repository's Herdr plugin for the current user.
  *
@@ -447,18 +440,23 @@ const runRequiredHerdr = (
  */
 export const runPluginInstall = (options: PluginInstallOptions): PluginInstallResult => {
   const { root, manifest } = readPluginManifest(options.pluginPath);
-  const list = runCommand(options.runner, herdrCommand(options.herdrPath), [
-    "plugin",
-    "list",
-    "--json",
-  ]);
-  if (list.exitCode !== 0) throw commandFailure("herdr plugin list", list);
+  const list = runRequiredCommand(
+    options.runner,
+    "herdr plugin list",
+    herdrCommand(options.herdrPath),
+    ["plugin", "list", "--json"],
+  );
 
   const existing = pluginEntriesFromResponse(list.stdout).find(
     (plugin) => plugin.pluginId === manifest.id,
   );
   if (existing === undefined) {
-    runRequiredHerdr(options, ["plugin", "link", root, "--enabled"], "herdr plugin link");
+    runRequiredCommand(options.runner, "herdr plugin link", herdrCommand(options.herdrPath), [
+      "plugin",
+      "link",
+      root,
+      "--enabled",
+    ]);
     return { exitCode: 0, action: "linked", pluginPath: root };
   }
 
@@ -471,12 +469,25 @@ export const runPluginInstall = (options: PluginInstallOptions): PluginInstallRe
   }
 
   if (comparablePluginRoot(existing) === root && existing.version === manifest.version) {
-    runRequiredHerdr(options, ["plugin", "enable", manifest.id], "herdr plugin enable");
+    runRequiredCommand(options.runner, "herdr plugin enable", herdrCommand(options.herdrPath), [
+      "plugin",
+      "enable",
+      manifest.id,
+    ]);
     return { exitCode: 0, action: "enabled", pluginPath: root };
   }
 
-  runRequiredHerdr(options, ["plugin", "unlink", manifest.id], "herdr plugin unlink");
-  runRequiredHerdr(options, ["plugin", "link", root, "--enabled"], "herdr plugin link");
+  runRequiredCommand(options.runner, "herdr plugin unlink", herdrCommand(options.herdrPath), [
+    "plugin",
+    "unlink",
+    manifest.id,
+  ]);
+  runRequiredCommand(options.runner, "herdr plugin link", herdrCommand(options.herdrPath), [
+    "plugin",
+    "link",
+    root,
+    "--enabled",
+  ]);
   return { exitCode: 0, action: "relinked", pluginPath: root };
 };
 

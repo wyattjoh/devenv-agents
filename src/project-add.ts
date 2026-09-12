@@ -12,9 +12,9 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import {
-  runCommand,
-  runGitCommand,
-  type CommandResult,
+  errorMessage,
+  runRequiredCommand,
+  runRequiredGitCommand,
   type CommandRunner,
 } from "./command-runner.ts";
 import { assertProjectPluginEnabled } from "./worktree-plugin.ts";
@@ -137,22 +137,6 @@ const isDirectory = (path: string): boolean => {
   }
 };
 
-const commandFailure = (label: string, result: CommandResult): Error => {
-  const detail = result.stderr.trim() || result.stdout.trim() || "no output";
-  return new Error(`${label} failed with exit code ${result.exitCode}: ${detail}`);
-};
-
-const runRequiredCommand = (
-  runner: CommandRunner,
-  command: string,
-  args: readonly string[],
-  label: string,
-  cwd: string,
-): void => {
-  const result = runCommand(runner, command, args, { cwd, env: undefined });
-  if (result.exitCode !== 0) throw commandFailure(label, result);
-};
-
 const templateHint = (): string =>
   `Available templates: ${PROJECT_TEMPLATES.join(", ")}. Use 'project add ${"<forge>/<org>/<repo>"} --from <template>'.`;
 
@@ -242,8 +226,12 @@ const ensureCheckout = (
   }
 
   mkdirSync(dirname(checkoutPath), { recursive: true });
-  const clone = runGitCommand(runner, ["clone", repository.cloneUrl, checkoutPath], codeRoot);
-  if (clone.exitCode !== 0) throw commandFailure("git clone", clone);
+  runRequiredGitCommand(
+    runner,
+    "git clone",
+    ["clone", repository.cloneUrl, checkoutPath],
+    codeRoot,
+  );
 
   // A recording runner stands in for clone in tests. The real command creates
   // this directory itself; making the postcondition explicit keeps subsequent
@@ -296,8 +284,9 @@ const projectsFileRecords = (projectsFile: string): ProjectRegistration[] => {
   try {
     parsed = Bun.TOML.parse(readFileSync(projectsFile, "utf8")) as unknown;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Unable to parse projects file ${projectsFile}: ${message}`, { cause: error });
+    throw new Error(`Unable to parse projects file ${projectsFile}: ${errorMessage(error)}`, {
+      cause: error,
+    });
   }
   if (typeof parsed !== "object" || parsed === null) {
     throw new Error(`Projects file ${projectsFile} must contain a TOML table`);
@@ -464,20 +453,20 @@ const prepareDevenv = (
 ): void => {
   const template = projectTemplate(from, templateRoot);
   if (hasDevenvFile(projectPath)) {
-    runRequiredCommand(runner, "devenv", ["allow"], "devenv allow", projectPath);
+    runRequiredCommand(runner, "devenv allow", "devenv", ["allow"], {
+      cwd: projectPath,
+      env: undefined,
+    });
     return;
   }
   if (template === undefined) {
     throw new Error(`No devenv files found in ${projectPath}. ${templateHint()}`);
   }
   // `allow` persists the --from binding for later commands in this checkout.
-  runRequiredCommand(
-    runner,
-    "devenv",
-    ["--from", template, "allow"],
-    "devenv template allow",
-    projectPath,
-  );
+  runRequiredCommand(runner, "devenv template allow", "devenv", ["--from", template, "allow"], {
+    cwd: projectPath,
+    env: undefined,
+  });
 };
 
 const registerProject = (
@@ -497,17 +486,17 @@ const registerProject = (
   const unitDropIn = writeProjectDropIn({ project, systemdUserDirectory });
   runRequiredCommand(
     options.runner,
+    "systemctl --user daemon-reload",
     "systemctl",
     ["--user", "daemon-reload"],
-    "systemctl --user daemon-reload",
-    project.path,
+    { cwd: project.path, env: undefined },
   );
   runRequiredCommand(
     options.runner,
+    `systemctl --user enable --now herdr@${project.session}`,
     "systemctl",
     ["--user", "enable", "--now", `herdr@${project.session}`],
-    `systemctl --user enable --now herdr@${project.session}`,
-    project.path,
+    { cwd: project.path, env: undefined },
   );
   return { unitDropIn, projectsFile: undefined };
 };
@@ -534,19 +523,19 @@ export const runProjectAdd = (options: ProjectAddOptions): ProjectAddResult => {
   const checkoutCreated = ensureCheckout(repository, checkoutPath, codeRoot, options.runner);
 
   prepareDevenv(checkoutPath, options.from, options.templateRoot, options.runner);
-  runRequiredCommand(options.runner, "direnv", ["allow"], "direnv allow", checkoutPath);
+  runRequiredCommand(options.runner, "direnv allow", "direnv", ["allow"], {
+    cwd: checkoutPath,
+    env: undefined,
+  });
   const declaration: ProjectDeclaration = readProjectDeclaration(checkoutPath);
   const session = projectSession(repository, declaration);
   ensureLocalLayer(checkoutPath);
   writeInfoExcludes(checkoutPath);
   // Warm the profile without opening an interactive nested shell.
-  runRequiredCommand(
-    options.runner,
-    "devenv",
-    ["shell", "--", "true"],
-    "devenv shell -- true",
-    checkoutPath,
-  );
+  runRequiredCommand(options.runner, "devenv shell -- true", "devenv", ["shell", "--", "true"], {
+    cwd: checkoutPath,
+    env: undefined,
+  });
 
   options.syncReferences({
     projectRoot: checkoutPath,

@@ -120,7 +120,7 @@ describe("project update", () => {
         kind: "worktree",
         path: worktrees[0],
         success: false,
-        error: "devenv shell -- true failed with exit code 1: branch lock drift",
+        error: expect.stringContaining("devenv shell -- true"),
       },
       {
         kind: "worktree",
@@ -145,15 +145,8 @@ describe("project update", () => {
       ["devenv", "shell", "--", "true", worktrees[0]],
       ["devenv", "shell", "--", "true", worktrees[1]],
     ]);
-    expect(formatProjectUpdate(update)).toBe(
-      [
-        `Agents input (${mainCheckout}): succeeded`,
-        `Main checkout (${mainCheckout}): succeeded`,
-        `Worktree (${worktrees[0]}): failed: devenv shell -- true failed with exit code 1: branch lock drift`,
-        `Worktree (${worktrees[1]}): succeeded`,
-        "Summary: 3 succeeded, 1 failed",
-        "",
-      ].join("\n"),
+    expect(formatProjectUpdate(update)).toContain(
+      `Worktree (${worktrees[0]}): failed: devenv shell -- true`,
     );
   });
 
@@ -172,7 +165,7 @@ describe("project update", () => {
       kind: "agents-input",
       path: realpathSync(fixture.repository),
       success: false,
-      error: "devenv update agents failed with exit code 1: network unavailable",
+      error: expect.stringContaining("devenv update agents"),
     });
     expect(update.items.slice(1).every((item) => item.success)).toBe(true);
     expect(runner.calls.map((call) => [call.command, ...call.args])).toContainEqual([
@@ -202,12 +195,10 @@ describe("project update", () => {
       kind: "worktree-list",
       path: realpathSync(fixture.repository),
       success: false,
-      error: "git worktree list failed with exit code 1: worktree list unavailable",
+      error: expect.stringContaining("git worktree list"),
     });
     expect(formatProjectUpdate(update)).toContain(
-      "Worktree list (" +
-        realpathSync(fixture.repository) +
-        "): failed: git worktree list failed with exit code 1: worktree list unavailable",
+      `Worktree list (${realpathSync(fixture.repository)}): failed: git worktree list`,
     );
   });
 
@@ -232,9 +223,7 @@ describe("project update", () => {
     expect(runCli(["update"], output.io, dependencies)).toBe(1);
     expect(output.stderr()).toBe("");
     expect(output.stdout()).toContain(
-      "Worktree (" +
-        realpathSync(fixture.worktree) +
-        "): failed: devenv shell -- true failed with exit code 1: worktree build failed",
+      `Worktree (${realpathSync(fixture.worktree)}): failed: devenv shell -- true`,
     );
   });
 

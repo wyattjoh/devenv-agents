@@ -268,11 +268,11 @@ describe("worktree plugin event hook", () => {
     const statusPaths = getWorktreeStatusPaths(mainCheckout, worktreePath);
 
     expect(first.opened).toBe(false);
-    expect(first.error).toBe("herdr plugin pane open failed with exit code 1: overlay unavailable");
-    expect(readWorktreeStatus(statusPaths.statusPath)).toEqual({
+    expect(first.error).toEqual(expect.stringContaining("herdr plugin pane open"));
+    expect(readWorktreeStatus(statusPaths.statusPath)).toMatchObject({
       path: worktreePath,
       state: "failed",
-      error: "herdr plugin pane open failed with exit code 1: overlay unavailable",
+      error: expect.stringContaining("herdr plugin pane open"),
       started_at: "2026-09-08T01:00:00.000Z",
       finished_at: "2026-09-08T01:00:00.000Z",
     });

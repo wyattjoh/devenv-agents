@@ -1,9 +1,9 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import {
-  runCommand,
-  runGitCommand,
-  type CommandResult,
+  errorMessage,
+  runRequiredCommand,
+  runRequiredGitCommand,
   type CommandRunner,
 } from "./command-runner.ts";
 import { resolveMainCheckout } from "./worktree-setup.ts";
@@ -40,14 +40,6 @@ export type ProjectUpdateOptions = {
   readonly runner: CommandRunner;
 };
 
-const commandFailure = (label: string, result: CommandResult): Error => {
-  const detail = result.stderr.trim() || result.stdout.trim() || "no output";
-  return new Error(`${label} failed with exit code ${result.exitCode}: ${detail}`);
-};
-
-const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
-
 const comparablePath = (path: string): string => {
   try {
     return realpathSync(path);
@@ -69,12 +61,12 @@ const worktreePaths = (stdout: string, mainCheckout: string): readonly string[] 
     .filter((path) => !samePath(path, mainCheckout));
 
 const listWorktrees = (mainCheckout: string, runner: CommandRunner): readonly string[] => {
-  const result = runGitCommand(
+  const result = runRequiredGitCommand(
     runner,
+    "git worktree list",
     ["-C", mainCheckout, "worktree", "list", "--porcelain"],
     mainCheckout,
   );
-  if (result.exitCode !== 0) throw commandFailure("git worktree list", result);
   return worktreePaths(result.stdout, mainCheckout);
 };
 
@@ -86,8 +78,7 @@ const runDevenv = (
   label: string,
 ): ProjectUpdateItem => {
   try {
-    const result = runCommand(runner, "devenv", args, { cwd: path, env: undefined });
-    if (result.exitCode !== 0) throw commandFailure(label, result);
+    runRequiredCommand(runner, label, "devenv", args, { cwd: path, env: undefined });
     return { kind, path, success: true, error: undefined };
   } catch (error) {
     return { kind, path, success: false, error: errorMessage(error) };

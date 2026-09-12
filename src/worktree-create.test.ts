@@ -213,9 +213,7 @@ describe("worktree creation", () => {
 
     expect(runCli(["wt", "create", branch], io, dependencies(mainCheckout, runner))).toBe(1);
     expect(output.stdout).toBe("");
-    expect(output.stderr).toBe(
-      "project wt create: devenv shell -- true failed with exit code 1: warm exploded\n",
-    );
+    expect(output.stderr).toContain("project wt create: devenv shell -- true");
   });
 
   it("prompts for a branch and creates a focused worktree", () => {

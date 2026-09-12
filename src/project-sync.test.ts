@@ -11,7 +11,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { createRecordingRunner, realCommandRunner, type CommandResult } from "./command-runner.ts";
+import {
+  createRecordingRunner,
+  errorMessage,
+  realCommandRunner,
+  type CommandResult,
+} from "./command-runner.ts";
 import { runCli, type CliDependencies } from "./cli.ts";
 import { readProjectDeclaration, type ProjectDeclaration } from "./project-declaration.ts";
 import {
@@ -506,12 +511,8 @@ describe("project reference synchronization", () => {
     } catch (caught) {
       error = caught;
     }
-    expect(error instanceof Error ? error.message : String(error)).toContain(
-      "github.com/acme/missing-one",
-    );
-    expect(error instanceof Error ? error.message : String(error)).toContain(
-      "github.com/acme/missing-two",
-    );
+    expect(errorMessage(error)).toContain("github.com/acme/missing-one");
+    expect(errorMessage(error)).toContain("github.com/acme/missing-two");
   });
 
   it("does not touch the filesystem or runner when no references are declared", () => {
