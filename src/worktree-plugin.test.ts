@@ -2,20 +2,17 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import {
-  createRecordingRunner,
-  type CommandResult,
-  type RecordingRunner,
-} from "./command-runner.ts";
 import type { HerdrPlugin } from "./herdr-client.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
 import {
-  PROJECT_PLUGIN_ID,
-  runPluginInstall,
-  runWorktreeEvent,
-  type WorktreeEventOptions,
-} from "./worktree-plugin.ts";
+  createRecordingRunner,
+  type CommandResult,
+  type RecordingRunner,
+} from "./testing/command-runner.ts";
+import { PROJECT_PLUGIN_ID, runPluginInstall, runWorktreeEvent } from "./worktree-plugin.ts";
+
+type WorktreeEventOptions = Parameters<typeof runWorktreeEvent>[0];
 
 const created: string[] = [];
 const pluginRoot = fileURLToPath(new URL("../plugin", import.meta.url));

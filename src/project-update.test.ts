@@ -1,19 +1,21 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
-import {
-  createRecordingRunner,
-  realCommandRunner,
-  type CommandInvocation,
-  type CommandResult,
-} from "./command-runner.ts";
+import { defaultCommandRunner } from "./command-runner.ts";
 import { runCli } from "./cli.ts";
 import { captureOutput, createCliDependencies } from "./testing/cli.ts";
-import { writeProjectsFile, type ProjectRegistration } from "./project-add.ts";
+import { writeProjectsFile } from "./project-add.ts";
 import { formatProjectUpdate, runProjectUpdate } from "./project-update.ts";
 import { createGitFixture } from "./testing/git-fixture.ts";
+import {
+  createRecordingRunner,
+  type CommandInvocation,
+  type CommandResult,
+} from "./testing/command-runner.ts";
 import { spawnGit } from "./testing/git-env.ts";
 import { listLinkedWorktrees } from "./workspace.ts";
+
+type ProjectRegistration = Parameters<typeof writeProjectsFile>[0]["project"];
 
 const created: string[] = [];
 
@@ -36,7 +38,7 @@ const createFixture = (prefix: string) =>
   createGitFixture({ prefix, branch: undefined, worktreeName: undefined, env: undefined });
 
 const listedWorktreePaths = (repository: string): readonly string[] =>
-  listLinkedWorktrees(repository, realCommandRunner).map((worktree) => worktree.path);
+  listLinkedWorktrees(repository, defaultCommandRunner).map((worktree) => worktree.path);
 
 afterEach(() => {
   for (const path of created.splice(0)) rmSync(path, { recursive: true, force: true });

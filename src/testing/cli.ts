@@ -1,11 +1,14 @@
-import type { CliDependencies, CliIO } from "../cli.ts";
-import { createRecordingRunner } from "../command-runner.ts";
+import { runCli } from "../cli.ts";
+import { createRecordingRunner } from "./command-runner.ts";
 import { createFakeHerdrClient } from "./herdr-client.ts";
 import { createFakeWorktreeBootstrap } from "./worktree-bootstrap.ts";
 
 /**
  * Captured output channels for CLI tests.
  */
+type CliIO = NonNullable<Parameters<typeof runCli>[1]>;
+type CliDependencies = NonNullable<Parameters<typeof runCli>[2]>;
+
 export type CapturedOutput = {
   readonly io: CliIO;
   readonly stdout: () => string;

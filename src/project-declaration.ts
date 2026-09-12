@@ -9,12 +9,12 @@ export const PROJECT_DECLARATION_PATH = ".agents/project.toml";
 /**
  * A grant that can be materialized from a referenced project.
  */
-export type ReferenceGrant = "tree" | "module" | "services";
+type ReferenceGrant = "tree" | "module" | "services";
 
 /**
  * One declared cross-project reference and its allowed grants.
  */
-export type ProjectReference = {
+type ProjectReference = {
   readonly repo: string;
   readonly grant: readonly ReferenceGrant[];
 };

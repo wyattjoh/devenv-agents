@@ -1,14 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import {
   CommandFailure,
-  createRecordingRunner,
   defaultCommandRunner,
   errorMessage,
   runCommand,
   runRequiredCommand,
   runRequiredGitCommand,
-  type CommandResult,
 } from "./command-runner.ts";
+import { createRecordingRunner, type CommandResult } from "./testing/command-runner.ts";
 
 const result = (stdout: string): CommandResult => ({
   exitCode: 0,

@@ -2,21 +2,33 @@ import { describe, expect, it } from "bun:test";
 import { lstatSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  awaitWorktreeBootstrap,
-  forgetWorktreeBootstrap,
-  inspectWorktreeBootstrap,
-  requestWorktreeBootstrap,
-  runWorktreeBootstrap,
+  createWorktreeBootstrap,
   warmWorktree,
-  type WorktreeBootstrapRunOptions,
+  type WorktreeBootstrap,
 } from "./worktree-bootstrap.ts";
+import { createFakeHerdrClient } from "./testing/herdr-client.ts";
+import { withGitFixture, type GitFixture } from "./testing/git-fixture.ts";
 import {
   createRecordingRunner,
   type CommandResult,
   type RecordingRunner,
-} from "./command-runner.ts";
-import { createFakeHerdrClient } from "./testing/herdr-client.ts";
-import { withGitFixture, type GitFixture } from "./testing/git-fixture.ts";
+} from "./testing/command-runner.ts";
+
+type BootstrapDependencies = Parameters<typeof createWorktreeBootstrap>[0];
+type BootstrapRunOptions = Parameters<WorktreeBootstrap["run"]>[0];
+type BootstrapAwaitOptions = Parameters<WorktreeBootstrap["await"]>[0];
+type TestRunOptions = BootstrapDependencies & BootstrapRunOptions;
+
+type RequestOptions = Parameters<WorktreeBootstrap["request"]>[0] &
+  Pick<BootstrapDependencies, "herdrClient" | "now">;
+
+type RequestResult = ReturnType<WorktreeBootstrap["request"]>;
+type InspectOptions = Parameters<WorktreeBootstrap["inspect"]>[0];
+type Inspection = ReturnType<WorktreeBootstrap["inspect"]>;
+type AwaitResult = ReturnType<WorktreeBootstrap["await"]>;
+type AwaitTestOptions = BootstrapAwaitOptions & { readonly now: BootstrapDependencies["now"] };
+
+type ForgetOptions = Parameters<WorktreeBootstrap["forget"]>[0];
 
 const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
   exitCode,
@@ -41,9 +53,9 @@ const fixtureOptions = {
 const makeRunOptions = (
   fixture: GitFixture,
   runner: RecordingRunner,
-  syncReferences: WorktreeBootstrapRunOptions["syncReferences"],
+  syncReferences: BootstrapDependencies["syncReferences"],
   now: (() => string) | undefined = () => "2026-09-08T01:00:00.000Z",
-): WorktreeBootstrapRunOptions => ({
+): TestRunOptions => ({
   mainCheckout: fixture.repository,
   worktreePath: fixture.worktree,
   herdrClient: createFakeHerdrClient(),
@@ -53,6 +65,51 @@ const makeRunOptions = (
   allowCompleted: undefined,
   io: undefined,
 });
+
+const requestWorktreeBootstrap = (options: RequestOptions): RequestResult => {
+  const bootstrap = createWorktreeBootstrap({
+    herdrClient: options.herdrClient,
+    runner: createRecordingRunner(),
+    syncReferences: () => undefined,
+    now: options.now,
+  });
+  return bootstrap.request({
+    mainCheckout: options.mainCheckout,
+    worktreePath: options.worktreePath,
+  });
+};
+
+const runWorktreeBootstrap = (options: TestRunOptions): ReturnType<WorktreeBootstrap["run"]> => {
+  const { herdrClient, runner, syncReferences, now, ...runOptions } = options;
+  return createWorktreeBootstrap({ herdrClient, runner, syncReferences, now }).run(runOptions);
+};
+
+const awaitWorktreeBootstrap = (options: AwaitTestOptions): AwaitResult => {
+  const { now, ...awaitOptions } = options;
+  return createWorktreeBootstrap({
+    herdrClient: createFakeHerdrClient(),
+    runner: createRecordingRunner(),
+    syncReferences: () => undefined,
+    now,
+  }).await(awaitOptions);
+};
+
+const inspectWorktreeBootstrap = (options: InspectOptions): Inspection =>
+  createWorktreeBootstrap({
+    herdrClient: createFakeHerdrClient(),
+    runner: createRecordingRunner(),
+    syncReferences: () => undefined,
+    now: undefined,
+  }).inspect(options);
+
+const forgetWorktreeBootstrap = (options: ForgetOptions): void => {
+  createWorktreeBootstrap({
+    herdrClient: createFakeHerdrClient(),
+    runner: createRecordingRunner(),
+    syncReferences: () => undefined,
+    now: undefined,
+  }).forget(options);
+};
 
 describe("worktree bootstrap", () => {
   it("requests one bootstrap when duplicate events arrive", () => {

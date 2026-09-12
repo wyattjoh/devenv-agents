@@ -11,22 +11,22 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import {
-  createRecordingRunner,
-  errorMessage,
-  realCommandRunner,
-  type CommandResult,
-} from "./command-runner.ts";
+import { defaultCommandRunner, errorMessage } from "./command-runner.ts";
 import { runCli } from "./cli.ts";
 import { captureOutput, createCliDependencies } from "./testing/cli.ts";
 import { readProjectDeclaration, type ProjectDeclaration } from "./project-declaration.ts";
-import {
-  createSyncReferences,
-  MissingReferencedCheckoutsError,
-  syncProjectReferences,
-  type SyncRequest,
-} from "./project-sync.ts";
+import { createSyncReferences, type SyncReferences } from "./project-sync.ts";
 import { withGitFixture } from "./testing/git-fixture.ts";
+import { createRecordingRunner, type CommandResult } from "./testing/command-runner.ts";
+
+type SyncRequest = Parameters<SyncReferences>[0];
+type SyncOptions = Parameters<typeof createSyncReferences>[0];
+
+const runSync = (request: SyncRequest, options: SyncOptions = {}): void => {
+  createSyncReferences(options)(request);
+};
+
+const syncProjectReferences = runSync;
 
 const created: string[] = [];
 
@@ -120,13 +120,11 @@ describe("project reference synchronization", () => {
       ),
     });
 
-    const sync = syncProjectReferences(requestFor(project.projectRoot, project.worktreePath), {
+    syncProjectReferences(requestFor(project.projectRoot, project.worktreePath), {
       homeDirectory: home,
       platform: "linux",
       runner,
     });
-
-    expect(sync.missingReferences).toEqual([]);
     expect(readFileSync(join(project.worktreePath, ".claude", "settings.local.json"), "utf8")).toBe(
       `{\n  "permissions": {\n    "additionalDirectories": [\n      "${sibling}"\n    ]\n  }\n}\n`,
     );
@@ -419,8 +417,8 @@ describe("project reference synchronization", () => {
         const output = captureOutput();
         const dependencies = createCliDependencies({
           cwd: fixture.worktree,
-          runner: realCommandRunner,
-          syncReferences: createSyncReferences({ codeRoot, runner: realCommandRunner }),
+          runner: defaultCommandRunner,
+          syncReferences: createSyncReferences({ codeRoot, runner: defaultCommandRunner }),
         });
 
         expect(runCli(["sync"], output.io, dependencies)).toBe(0);
@@ -488,7 +486,7 @@ describe("project reference synchronization", () => {
         homeDirectory: home,
         platform: "linux",
       }),
-    ).toThrow(MissingReferencedCheckoutsError);
+    ).toThrow("Missing referenced checkouts");
 
     expect(
       JSON.parse(
@@ -515,13 +513,11 @@ describe("project reference synchronization", () => {
       "devenv eval processes": result(1, "", "must not run"),
     });
 
-    const sync = syncProjectReferences(requestFor(project.projectRoot, project.worktreePath), {
+    syncProjectReferences(requestFor(project.projectRoot, project.worktreePath), {
       homeDirectory: "/tmp/does-not-exist",
       platform: "linux",
       runner,
     });
-
-    expect(sync.missingReferences).toEqual([]);
     expect(readdirSync(project.worktreePath)).toEqual(before);
     expect(existsSync(join(project.projectRoot, ".devenv"))).toBe(false);
     expect(runner.calls).toEqual([]);

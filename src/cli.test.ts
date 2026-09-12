@@ -1,15 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  COMMAND_HELP,
-  defaultDependencies,
-  HELP_TEXT,
-  PROJECT_NAME,
-  PROJECT_VERSION,
-  runCli,
-} from "./cli.ts";
-import { createRecordingRunner, type CommandResult } from "./command-runner.ts";
+import { runCli } from "./cli.ts";
+import { createRecordingRunner, type CommandResult } from "./testing/command-runner.ts";
 import { captureOutput, createCliDependencies } from "./testing/cli.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
@@ -63,7 +56,7 @@ describe("project CLI", () => {
     const output = captureOutput();
 
     expect(runCli(["--version"], output.io)).toBe(0);
-    expect(output.stdout()).toBe(`${PROJECT_NAME} ${PROJECT_VERSION}\n`);
+    expect(output.stdout()).toBe("project 0.1.0\n");
     expect(output.stderr()).toBe("");
   });
 
@@ -71,8 +64,7 @@ describe("project CLI", () => {
     const output = captureOutput();
 
     expect(runCli(["--help"], output.io)).toBe(0);
-    expect(output.stdout()).toBe(HELP_TEXT);
-    expect(HELP_TEXT).toBe(LEGACY_HELP_TEXT);
+    expect(output.stdout()).toBe(LEGACY_HELP_TEXT);
     expect(output.stderr()).toBe("");
   });
 
@@ -80,7 +72,7 @@ describe("project CLI", () => {
     const output = captureOutput();
 
     expect(runCli([], output.io)).toBe(0);
-    expect(output.stdout()).toBe(HELP_TEXT);
+    expect(output.stdout()).toBe(LEGACY_HELP_TEXT);
   });
 
   it("rejects unsupported arguments without terminating the test process", () => {
@@ -337,35 +329,6 @@ describe("project CLI", () => {
       expect(output.stderr()).toBe(
         `project ${testCase.label}: ${testCase.detail}\nRun 'project --help' for usage.\n`,
       );
-    }
-  });
-
-  it("renders help from every command-table entry", () => {
-    const output = captureOutput();
-
-    expect(runCli(["--help"], output.io, createCliDependencies())).toBe(0);
-    expect(output.stdout()).toBe(HELP_TEXT);
-    for (const command of COMMAND_HELP) {
-      expect(output.stdout()).toContain(command.usage);
-      expect(output.stdout()).toContain(command.description);
-      for (const flag of command.flags) expect(output.stdout()).toContain(flag);
-    }
-  });
-
-  it("pins the default prompt fallback when prompt is unavailable", () => {
-    const global = globalThis as unknown as {
-      prompt: ((message?: string) => string | null) | undefined;
-    };
-    const originalPrompt = global.prompt;
-    global.prompt = undefined;
-
-    try {
-      const dependencies = defaultDependencies({ PROJECT_PLATFORM: "darwin" });
-
-      expect(dependencies.readLine("Branch name: ")).toBe("");
-      expect(dependencies.readLine()).toBe("q");
-    } finally {
-      global.prompt = originalPrompt;
     }
   });
 

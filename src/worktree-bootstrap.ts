@@ -34,22 +34,22 @@ import { canonicalPath, resolveMainCheckout, samePath } from "./workspace.ts";
 /**
  * The Herdr plugin identifier used by the setup overlay.
  */
-export const WORKTREE_PLUGIN_ID = "wyattjoh.project-worktrees";
+const WORKTREE_PLUGIN_ID = "wyattjoh.project-worktrees";
 
 /**
  * The lifecycle states visible through the bootstrap interface.
  */
-export type WorktreeBootstrapState = "running" | "done" | "failed";
+type WorktreeBootstrapState = "running" | "done" | "failed";
 
 /**
  * The state returned when no bootstrap record exists.
  */
-export type WorktreeBootstrapObservedState = WorktreeBootstrapState | "none";
+type WorktreeBootstrapObservedState = WorktreeBootstrapState | "none";
 
 /**
  * A worktree and its owning main checkout.
  */
-export type WorktreeBootstrapTarget = {
+type WorktreeBootstrapTarget = {
   readonly mainCheckout: string;
   readonly worktreePath: string;
 };
@@ -57,7 +57,7 @@ export type WorktreeBootstrapTarget = {
 /**
  * The result of requesting a setup pane for a worktree.
  */
-export type WorktreeBootstrapRequestResult = {
+type WorktreeBootstrapRequestResult = {
   readonly state: WorktreeBootstrapObservedState;
   readonly claimed: boolean;
   readonly opened: boolean;
@@ -86,7 +86,7 @@ export type WorktreeBootstrapResult = {
 /**
  * Interactive input used when a setup pane retries a failed bootstrap.
  */
-export type WorktreeBootstrapIO = {
+type WorktreeBootstrapIO = {
   /**
    * Reads the retry decision. Empty input retries; q, quit, and exit stop.
    */
@@ -100,7 +100,7 @@ export type WorktreeBootstrapIO = {
 /**
  * Dependencies required to run a bootstrap.
  */
-export type WorktreeBootstrapDependencies = {
+type WorktreeBootstrapDependencies = {
   readonly herdrClient: HerdrClient;
   readonly runner: CommandRunner;
   readonly syncReferences: SyncReferences;
@@ -110,7 +110,7 @@ export type WorktreeBootstrapDependencies = {
 /**
  * Options for requesting a setup pane.
  */
-export type WorktreeBootstrapRequestOptions = WorktreeBootstrapTarget & {
+type WorktreeBootstrapRequestOptions = WorktreeBootstrapTarget & {
   readonly herdrClient: HerdrClient;
   readonly now: (() => string) | undefined;
 };
@@ -118,7 +118,7 @@ export type WorktreeBootstrapRequestOptions = WorktreeBootstrapTarget & {
 /**
  * Options for running a bootstrap in the current process.
  */
-export type WorktreeBootstrapRunOptions = Omit<WorktreeBootstrapTarget, "mainCheckout"> & {
+type WorktreeBootstrapRunOptions = Omit<WorktreeBootstrapTarget, "mainCheckout"> & {
   readonly mainCheckout: string | undefined;
   readonly herdrClient: HerdrClient;
   readonly runner: CommandRunner;
@@ -136,7 +136,7 @@ export type WorktreeBootstrapDeadline = string | number | Date;
 /**
  * Options for awaiting a terminal bootstrap state.
  */
-export type WorktreeBootstrapAwaitOptions = WorktreeBootstrapTarget & {
+type WorktreeBootstrapAwaitOptions = WorktreeBootstrapTarget & {
   readonly deadline: WorktreeBootstrapDeadline;
   readonly now: (() => string) | undefined;
   readonly sleep: (() => void) | undefined;
@@ -145,7 +145,7 @@ export type WorktreeBootstrapAwaitOptions = WorktreeBootstrapTarget & {
 /**
  * The result of awaiting a bootstrap.
  */
-export type WorktreeBootstrapAwaitResult = {
+type WorktreeBootstrapAwaitResult = {
   readonly state: "done" | "failed" | "timeout";
   readonly error: string | undefined;
 };
@@ -153,7 +153,7 @@ export type WorktreeBootstrapAwaitResult = {
 /**
  * Options for warming a checkout's devenv and direnv environment.
  */
-export type WorktreeBootstrapWarmOptions = WorktreeBootstrapTarget & {
+type WorktreeBootstrapWarmOptions = WorktreeBootstrapTarget & {
   readonly runner: CommandRunner;
   readonly devenvTemplate: string | undefined;
   readonly missingDevenvError: string | undefined;
@@ -162,12 +162,12 @@ export type WorktreeBootstrapWarmOptions = WorktreeBootstrapTarget & {
 /**
  * Options for inspecting a bootstrap.
  */
-export type WorktreeBootstrapInspectOptions = WorktreeBootstrapTarget;
+type WorktreeBootstrapInspectOptions = WorktreeBootstrapTarget;
 
 /**
  * Options for forgetting a bootstrap record.
  */
-export type WorktreeBootstrapForgetOptions = WorktreeBootstrapTarget;
+type WorktreeBootstrapForgetOptions = WorktreeBootstrapTarget;
 
 /**
  * The five-verb bootstrap interface used by lifecycle callers.
@@ -621,7 +621,7 @@ const requestOnce = (options: WorktreeBootstrapRequestOptions): WorktreeBootstra
  * @param options Worktree target, Herdr client, and timestamp factory.
  * @returns The request outcome and observed state.
  */
-export const requestWorktreeBootstrap = (
+const requestWorktreeBootstrap = (
   options: WorktreeBootstrapRequestOptions,
 ): WorktreeBootstrapRequestResult => requestOnce(options);
 
@@ -744,9 +744,7 @@ const runOnce = (options: ResolvedWorktreeBootstrapRunOptions): WorktreeBootstra
  * @param options Worktree target, command seams, sync seam, and retry input.
  * @returns The run outcome and any captured error.
  */
-export const runWorktreeBootstrap = (
-  options: WorktreeBootstrapRunOptions,
-): WorktreeBootstrapResult => {
+const runWorktreeBootstrap = (options: WorktreeBootstrapRunOptions): WorktreeBootstrapResult => {
   const resolved = resolveRunOptions(options);
   let result = runOnce(resolved);
   while (result.exitCode !== 0 && options.io !== undefined) {
@@ -778,7 +776,7 @@ const clockMilliseconds = (now: (() => string) | undefined): number => {
  * @param options Worktree target, absolute deadline, clock, and sleep seam.
  * @returns The terminal state or a distinct timeout outcome.
  */
-export const awaitWorktreeBootstrap = (
+const awaitWorktreeBootstrap = (
   options: WorktreeBootstrapAwaitOptions,
 ): WorktreeBootstrapAwaitResult => {
   const deadline = deadlineMilliseconds(options.deadline);
@@ -803,7 +801,7 @@ export const awaitWorktreeBootstrap = (
  * @param options Worktree target.
  * @returns The observed state and public lifecycle metadata.
  */
-export const inspectWorktreeBootstrap = (
+const inspectWorktreeBootstrap = (
   options: WorktreeBootstrapInspectOptions,
 ): WorktreeBootstrapInspection => currentInspection(options);
 
@@ -813,7 +811,7 @@ export const inspectWorktreeBootstrap = (
  * @param options Worktree target.
  * @returns Nothing; missing records are ignored.
  */
-export const forgetWorktreeBootstrap = (options: WorktreeBootstrapForgetOptions): void => {
+const forgetWorktreeBootstrap = (options: WorktreeBootstrapForgetOptions): void => {
   forgetWorktreeStatus(options.mainCheckout, options.worktreePath);
 };
 

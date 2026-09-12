@@ -14,12 +14,12 @@ export const PROJECT_PLUGIN_ID = "wyattjoh.project-worktrees";
 /**
  * The manifest file expected at the root of a Herdr plugin directory.
  */
-export const PROJECT_PLUGIN_MANIFEST = "herdr-plugin.toml";
+const PROJECT_PLUGIN_MANIFEST = "herdr-plugin.toml";
 
 /**
  * Environment variables accepted as an override for the packaged plugin path.
  */
-export const PROJECT_PLUGIN_PATH_ENV = "DEVENV_AGENTS_PLUGIN_PATH";
+const PROJECT_PLUGIN_PATH_ENV = "DEVENV_AGENTS_PLUGIN_PATH";
 
 /**
  * A read-only environment snapshot used by plugin commands.
@@ -29,7 +29,7 @@ export type PluginEnvironment = Readonly<Record<string, string | undefined>>;
 /**
  * Dependencies for one Herdr worktree lifecycle event.
  */
-export type WorktreeEventOptions = {
+type WorktreeEventOptions = {
   readonly eventJson: string | undefined;
   readonly workspaceId: string | undefined;
   readonly bootstrap: WorktreeBootstrap;
@@ -52,7 +52,7 @@ export type WorktreeEventResult = {
 /**
  * Dependencies for linking the packaged Herdr plugin.
  */
-export type PluginInstallOptions = {
+type PluginInstallOptions = {
   readonly pluginPath: string;
   readonly herdrClient: HerdrClient;
 };
@@ -60,7 +60,7 @@ export type PluginInstallOptions = {
 /**
  * The action taken while installing or refreshing the plugin.
  */
-export type PluginInstallAction = "linked" | "relinked" | "enabled" | "unchanged";
+type PluginInstallAction = "linked" | "relinked" | "enabled" | "unchanged";
 
 /**
  * The observable result of a plugin installation.

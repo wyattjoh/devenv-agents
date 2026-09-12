@@ -8,7 +8,7 @@ import { getManagedWorktreeRoot, resolveMainCheckout, worktreeLabel } from "./wo
 /**
  * The ids returned by Herdr after creating a workspace and its root pane.
  */
-export type WorktreeCreateIds = {
+type WorktreeCreateIds = {
   readonly workspaceId: string;
   readonly rootPaneId: string;
 };
@@ -24,7 +24,7 @@ export type WorktreeCreateResult = WorktreeCreateIds & {
 /**
  * Dependencies and options for one managed worktree creation.
  */
-export type WorktreeCreateOptions = {
+type WorktreeCreateOptions = {
   readonly cwd: string;
   readonly branch: string;
   readonly base: string | undefined;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { CommandFailure, createRecordingRunner, realCommandRunner } from "./command-runner.ts";
+import { CommandFailure, defaultCommandRunner } from "./command-runner.ts";
 import {
   getManagedWorktreeRoot,
   listLinkedWorktrees,
@@ -11,6 +11,9 @@ import {
 } from "./workspace.ts";
 import { spawnGit } from "./testing/git-env.ts";
 import { withGitFixture } from "./testing/git-fixture.ts";
+import { createRecordingRunner } from "./testing/command-runner.ts";
+
+const realCommandRunner = defaultCommandRunner;
 
 const requireGit = (repository: string, args: readonly string[], operation: string): void => {
   const result = spawnGit(["-C", repository, ...args]);

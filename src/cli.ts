@@ -45,18 +45,18 @@ import { createSyncReferences, runProjectSync, type SyncReferences } from "./pro
 /**
  * The public command name used by the standalone binary and the Bun entrypoint.
  */
-export const PROJECT_NAME = "project";
+const PROJECT_NAME = "project";
 
 /**
  * The initial version of the project CLI.
  */
-export const PROJECT_VERSION = "0.1.0";
+const PROJECT_VERSION = "0.1.0";
 
 /**
  * The output channels used by the CLI, kept injectable so command behavior can
  * be tested without replacing the process streams.
  */
-export type CliIO = {
+type CliIO = {
   readonly stdout: (text: string) => void;
   readonly stderr: (text: string) => void;
 };
@@ -64,7 +64,7 @@ export type CliIO = {
 /**
  * Host values resolved from the CLI environment before dispatching a command.
  */
-export type HostConfiguration = {
+type HostConfiguration = {
   readonly platform: ProjectPlatform;
   readonly homeDirectory: string;
   readonly projectsFile: string | undefined;
@@ -86,7 +86,7 @@ const processIO: CliIO = {
 /**
  * Runtime seams used by commands without replacing the process itself.
  */
-export type CliDependencies = {
+type CliDependencies = {
   readonly cwd: string | undefined;
   readonly now: () => string;
   readonly readLine: (message?: string) => string;
@@ -146,7 +146,7 @@ const platformFrom = (platform: string | undefined): ProjectPlatform => {
  * @returns The typed host configuration for one CLI invocation.
  * @throws When the configured or running host platform is unsupported.
  */
-export const resolveHostConfiguration = (
+const resolveHostConfiguration = (
   environment: PluginEnvironment = process.env,
 ): HostConfiguration => {
   const roots = defaultProjectRoots();
@@ -191,19 +191,6 @@ const createDefaultDependencies = (
     pluginPath: undefined,
   };
 };
-
-/**
- * Creates production CLI dependencies from one environment snapshot.
- *
- * @param environment Environment snapshot used for host and Herdr settings.
- * @param runner Command runner used by the default adapters.
- * @returns A complete production dependency record.
- */
-export const defaultDependencies = (
-  environment: PluginEnvironment = process.env,
-  runner: CommandRunner = defaultCommandRunner,
-): CliDependencies =>
-  createDefaultDependencies(resolveHostConfiguration(environment), environment, runner);
 
 const isHelpFlag = (argument: string): boolean => argument === "--help" || argument === "-h";
 
@@ -815,26 +802,6 @@ const commandUsage = (entry: CommandEntry): string => {
 };
 
 /**
- * Structured help metadata derived from the private command table.
- */
-export type CommandHelp = {
-  readonly usage: string;
-  readonly description: string;
-  readonly flags: readonly string[];
-};
-
-/**
- * The command metadata rendered by the CLI help output.
- */
-export const COMMAND_HELP: readonly CommandHelp[] = commandTable.map((entry) => ({
-  usage: commandUsage(entry),
-  description: entry.description,
-  flags: entry.flags.map((flag) =>
-    flag.valueName === undefined ? flag.name : `${flag.name} <${flag.valueName}>`,
-  ),
-}));
-
-/**
  * The prior literal help used three command-line description columns. Keep those
  * compatibility values centralized while entries select the legacy layout.
  */
@@ -891,7 +858,7 @@ const renderHelp = (entries: readonly CommandEntry[]): string => {
 /**
  * The help text for the project CLI, rendered from the command table.
  */
-export const HELP_TEXT = renderHelp(commandTable);
+const HELP_TEXT = renderHelp(commandTable);
 
 const commandEntryFor = (args: readonly string[]): CommandEntry | undefined => {
   let match: CommandEntry | undefined;

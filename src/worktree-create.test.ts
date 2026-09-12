@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { runCli } from "./cli.ts";
-import { createRecordingRunner, type CommandResult } from "./command-runner.ts";
 import type { HerdrPlugin } from "./herdr-client.ts";
 import { captureOutput, createCliDependencies } from "./testing/cli.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import { createFakeWorktreeBootstrap } from "./testing/worktree-bootstrap.ts";
+import { createRecordingRunner, type CommandResult } from "./testing/command-runner.ts";
 import { PROJECT_PLUGIN_ID } from "./worktree-plugin.ts";
 
 const created: string[] = [];

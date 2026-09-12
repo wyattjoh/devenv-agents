@@ -1,7 +1,6 @@
 import type {
   WorktreeBootstrap,
   WorktreeBootstrapInspection,
-  WorktreeBootstrapRequestResult,
   WorktreeBootstrapResult,
 } from "../worktree-bootstrap.ts";
 
@@ -9,6 +8,8 @@ import type {
  * Per-verb overrides for a fake bootstrap service.
  */
 export type FakeWorktreeBootstrapOverrides = Partial<WorktreeBootstrap>;
+
+type WorktreeBootstrapRequestResult = ReturnType<WorktreeBootstrap["request"]>;
 
 const noneInspection = (): WorktreeBootstrapInspection => ({
   state: "none",

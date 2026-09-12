@@ -21,7 +21,7 @@ export type HerdrWorktree = {
 /**
  * Optional scope for a Herdr worktree-list request.
  */
-export type HerdrWorktreeListOptions = {
+type HerdrWorktreeListOptions = {
   /** Working directory for the Herdr command. */
   readonly cwd: string | undefined;
   /** Restrict the list to one workspace, when supplied. */
@@ -31,12 +31,12 @@ export type HerdrWorktreeListOptions = {
 /**
  * The mutually exclusive focus modes accepted by Herdr worktree creation.
  */
-export type HerdrWorktreeFocus = "focus" | "no-focus" | undefined;
+type HerdrWorktreeFocus = "focus" | "no-focus" | undefined;
 
 /**
  * Arguments for creating a Herdr-managed worktree.
  */
-export type HerdrWorktreeCreateOptions = {
+type HerdrWorktreeCreateOptions = {
   /** Main checkout passed to Herdr as the command working directory. */
   readonly cwd: string;
   /** Branch name to create. */
@@ -54,7 +54,7 @@ export type HerdrWorktreeCreateOptions = {
 /**
  * Identifiers returned by Herdr after creating a worktree.
  */
-export type HerdrWorktreeCreateResult = {
+type HerdrWorktreeCreateResult = {
   /** The created workspace identifier. */
   readonly workspaceId: string;
   /** The created workspace's root pane identifier. */
@@ -64,7 +64,7 @@ export type HerdrWorktreeCreateResult = {
 /**
  * Arguments for opening an existing Herdr-managed worktree.
  */
-export type HerdrWorktreeOpenOptions = {
+type HerdrWorktreeOpenOptions = {
   /** Main checkout passed to Herdr as the command working directory. */
   readonly cwd: string;
   /** Checkout path to open. */
@@ -76,7 +76,7 @@ export type HerdrWorktreeOpenOptions = {
 /**
  * Arguments for opening a Herdr plugin pane.
  */
-export type HerdrPluginPaneOpenOptions = {
+type HerdrPluginPaneOpenOptions = {
   /** Plugin identifier owning the entrypoint. */
   readonly pluginId: string;
   /** Plugin entrypoint to open. */

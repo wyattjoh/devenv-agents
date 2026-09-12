@@ -25,17 +25,17 @@ import {
 /**
  * Per-worktree build directories reclaimed by project garbage collection.
  */
-export const WORKTREE_BUILD_DIRECTORIES = ["target", "node_modules"] as const;
+const WORKTREE_BUILD_DIRECTORIES = ["target", "node_modules"] as const;
 
 /**
  * One normalized Herdr worktree used by project garbage collection.
  */
-export type ProjectHerdrWorktree = HerdrWorktree;
+type ProjectHerdrWorktree = HerdrWorktree;
 
 /**
  * A worktree that garbage collection may remove after its preflight checks.
  */
-export type RemovableWorktree = {
+type RemovableWorktree = {
   readonly path: string;
   readonly branch: string;
   readonly workspaceId: string | undefined;
@@ -46,7 +46,7 @@ export type RemovableWorktree = {
 /**
  * A worktree retained because it is dirty, unmerged, open, or otherwise unsafe.
  */
-export type BusyWorktree = {
+type BusyWorktree = {
   readonly path: string;
   readonly branch: string | undefined;
   readonly workspaceId: string | undefined;
@@ -57,7 +57,7 @@ export type BusyWorktree = {
 /**
  * A Herdr workspace whose checkout has disappeared and can be closed.
  */
-export type DetachedWorkspace = {
+type DetachedWorkspace = {
   readonly path: string;
   readonly workspaceId: string;
 };
@@ -65,7 +65,7 @@ export type DetachedWorkspace = {
 /**
  * A terminal bootstrap record for a missing worktree registration.
  */
-export type StaleWorktreeStatus = {
+type StaleWorktreeStatus = {
   readonly path: string;
   readonly bootstrap: WorktreeBootstrapInspection;
 };
@@ -73,14 +73,14 @@ export type StaleWorktreeStatus = {
 /**
  * A directory below `.claude/worktrees` that is not a Git worktree or namespace.
  */
-export type UnregisteredWorktreeDirectory = {
+type UnregisteredWorktreeDirectory = {
   readonly path: string;
 };
 
 /**
  * The read-only garbage-collection plan for one project.
  */
-export type ProjectGcPlan = {
+type ProjectGcPlan = {
   readonly mainCheckout: string;
   readonly targetBranch: string;
   readonly removable: readonly RemovableWorktree[];
@@ -93,7 +93,7 @@ export type ProjectGcPlan = {
 /**
  * Inputs for planning and applying project garbage collection.
  */
-export type ProjectGcOptions = {
+type ProjectGcOptions = {
   readonly projectPath: string;
   readonly dryRun: boolean;
   readonly herdrClient: HerdrClient;
@@ -105,7 +105,7 @@ export type ProjectGcOptions = {
 /**
  * A cleanup action that failed after a plan was successfully created.
  */
-export type ProjectGcFailure = {
+type ProjectGcFailure = {
   readonly action: string;
   readonly path: string;
   readonly error: string;
@@ -127,7 +127,7 @@ export type ProjectGcResult = ProjectGcPlan & {
 /**
  * Inputs for adopting registered worktrees into the current Herdr session.
  */
-export type AdoptWorktreesOptions = {
+type AdoptWorktreesOptions = {
   readonly projectPath: string;
   readonly bootstrap: WorktreeBootstrap;
   readonly herdrClient: HerdrClient;
@@ -137,7 +137,7 @@ export type AdoptWorktreesOptions = {
 /**
  * The result for one worktree during adoption.
  */
-export type AdoptWorktreeItem = {
+type AdoptWorktreeItem = {
   readonly path: string;
   readonly branch: string | undefined;
   readonly bootstrap: WorktreeBootstrapResult | undefined;

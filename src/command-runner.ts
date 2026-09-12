@@ -23,7 +23,7 @@ const gitEnvKeys: ReadonlySet<string> = new Set(GIT_ENV_KEYS);
  * @param env Environment to sanitize. Defaults to the current process.
  * @returns A string-only environment safe to pass to a Git child process.
  */
-export const cleanGitEnv = (
+const cleanGitEnv = (
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): Record<string, string> =>
   Object.fromEntries(
@@ -33,19 +33,9 @@ export const cleanGitEnv = (
   );
 
 /**
- * External commands that the fleet invokes directly.
- */
-export const EXTERNAL_COMMANDS = ["herdr", "devenv", "direnv", "systemctl", "git"] as const;
-
-/**
- * Names of the external commands used by the fleet.
- */
-export type ExternalCommand = (typeof EXTERNAL_COMMANDS)[number];
-
-/**
  * A completed external-command invocation.
  */
-export type CommandResult = {
+type CommandResult = {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
@@ -89,7 +79,7 @@ export class CommandFailure extends Error {
 /**
  * The command and process settings supplied to a command runner.
  */
-export type CommandInvocation = {
+type CommandInvocation = {
   readonly command: string;
   readonly args: readonly string[];
   readonly cwd: string | undefined;
@@ -99,7 +89,7 @@ export type CommandInvocation = {
 /**
  * Optional process settings accepted by {@link runCommand}.
  */
-export type CommandOptions = {
+type CommandOptions = {
   readonly cwd: string | undefined;
   readonly env: Readonly<Record<string, string | undefined>> | undefined;
 };
@@ -117,13 +107,6 @@ export interface CommandRunner {
   run(invocation: CommandInvocation): CommandResult;
 }
 
-const copyInvocation = (invocation: CommandInvocation): CommandInvocation => ({
-  command: invocation.command,
-  args: [...invocation.args],
-  cwd: invocation.cwd,
-  env: invocation.env === undefined ? undefined : { ...invocation.env },
-});
-
 const inheritedEnvironment = (
   overrides: Readonly<Record<string, string | undefined>>,
 ): Record<string, string> =>
@@ -134,13 +117,31 @@ const inheritedEnvironment = (
   );
 
 /**
+ * Resolves the child environment for one command invocation.
+ *
+ * Git receives the inherited environment only after repository-location
+ * variables have been removed. Other commands retain the usual merge of
+ * process environment and invocation overrides.
+ */
+const environmentForInvocation = (
+  invocation: CommandInvocation,
+): Record<string, string> | undefined => {
+  if (invocation.command === "git") {
+    return cleanGitEnv({ ...process.env, ...invocation.env });
+  }
+  if (invocation.env === undefined) return undefined;
+  return inheritedEnvironment(invocation.env);
+};
+
+/**
  * Runs a real external command through Bun's synchronous process API.
  */
-export const realCommandRunner: CommandRunner = {
+const realCommandRunner: CommandRunner = {
   run: (invocation) => {
+    const environment = environmentForInvocation(invocation);
     const result = Bun.spawnSync([invocation.command, ...invocation.args], {
       ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
-      ...(invocation.env === undefined ? {} : { env: inheritedEnvironment(invocation.env) }),
+      ...(environment === undefined ? {} : { env: environment }),
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -254,84 +255,3 @@ export const runGitCommand = (
     cwd,
     env: cleanGitEnv(env ?? process.env),
   });
-
-/**
- * A response configured for a recording runner. Arrays provide responses for
- * repeated calls in order, and a function can derive a response from a call.
- */
-export type CannedCommandResponse =
-  | CommandResult
-  | readonly CommandResult[]
-  | ((invocation: CommandInvocation) => CommandResult);
-
-/**
- * Responses keyed by executable name or by its complete space-separated argv.
- */
-export type RecordingResponses = Readonly<Record<string, CannedCommandResponse>>;
-
-/**
- * A command runner that records every call and returns configured responses.
- */
-export interface RecordingRunner extends CommandRunner {
-  /**
-   * Every invocation received by the runner, in call order.
-   */
-  readonly calls: CommandInvocation[];
-
-  /**
-   * Removes all recorded invocations and resets response sequence counters.
-   */
-  reset(): void;
-}
-
-const EMPTY_RESULT: CommandResult = {
-  exitCode: 0,
-  stdout: "",
-  stderr: "",
-};
-
-const copyResult = (result: CommandResult): CommandResult => ({ ...result });
-
-/**
- * Creates a recording command runner for deterministic service tests.
- *
- * A response may be keyed by `herdr`, `devenv`, `direnv`, or `systemctl`, or by the
- * complete invocation such as `herdr plugin list`. Unconfigured commands
- * return a successful empty result instead of spawning a process.
- *
- * @param responses Canned responses keyed by executable or complete argv.
- * @returns A recording runner suitable for dependency injection.
- */
-export const createRecordingRunner = (
-  responses: RecordingResponses | undefined = undefined,
-): RecordingRunner => {
-  const configured = responses ?? {};
-  const calls: CommandInvocation[] = [];
-  const sequence = new Map<string, number>();
-
-  const run = (invocation: CommandInvocation): CommandResult => {
-    const recorded = copyInvocation(invocation);
-    calls.push(recorded);
-
-    const exactKey = [invocation.command, ...invocation.args].join(" ");
-    const responseKey = configured[exactKey] === undefined ? invocation.command : exactKey;
-    const response = configured[responseKey];
-    if (response === undefined) return copyResult(EMPTY_RESULT);
-
-    if (typeof response === "function") return copyResult(response(recorded));
-    if ("exitCode" in response) return copyResult(response);
-
-    const index = sequence.get(responseKey) ?? 0;
-    sequence.set(responseKey, index + 1);
-    return copyResult(response[Math.min(index, response.length - 1)] ?? EMPTY_RESULT);
-  };
-
-  return {
-    calls,
-    run,
-    reset: () => {
-      calls.splice(0, calls.length);
-      sequence.clear();
-    },
-  };
-};

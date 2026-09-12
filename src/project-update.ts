@@ -5,12 +5,12 @@ import { warmWorktree } from "./worktree-bootstrap.ts";
 /**
  * The operation represented by one project-update report item.
  */
-export type ProjectUpdateKind = "agents-input" | "main" | "worktree-list" | "worktree";
+type ProjectUpdateKind = "agents-input" | "main" | "worktree-list" | "worktree";
 
 /**
  * The result of updating one project path or worktree.
  */
-export type ProjectUpdateItem = {
+type ProjectUpdateItem = {
   readonly kind: ProjectUpdateKind;
   readonly path: string;
   readonly success: boolean;
@@ -29,7 +29,7 @@ export type ProjectUpdateResult = {
 /**
  * Dependencies and project path needed for one update.
  */
-export type ProjectUpdateOptions = {
+type ProjectUpdateOptions = {
   readonly projectPath: string;
   readonly runner: CommandRunner;
 };

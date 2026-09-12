@@ -10,25 +10,25 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  createRecordingRunner,
-  type CommandResult,
-  type RecordingRunner,
-} from "./command-runner.ts";
 import { runCli } from "./cli.ts";
 import type { HerdrPlugin } from "./herdr-client.ts";
 import { captureOutput, createCliDependencies } from "./testing/cli.ts";
 import { createFakeHerdrClient } from "./testing/herdr-client.ts";
 import {
   enumerateProjects,
-  parseProjectRepository,
   runProjectAdd,
   writeProjectDropIn,
   writeProjectsFile,
-  type ProjectAddOptions,
-  type ProjectRegistration,
 } from "./project-add.ts";
 import { PROJECT_PLUGIN_ID } from "./worktree-plugin.ts";
+import {
+  createRecordingRunner,
+  type CommandResult,
+  type RecordingRunner,
+} from "./testing/command-runner.ts";
+
+type ProjectAddOptions = Parameters<typeof runProjectAdd>[0];
+type ProjectRegistration = ReturnType<typeof enumerateProjects>[number];
 
 const created: string[] = [];
 const pluginRoot = fileURLToPath(new URL("../plugin", import.meta.url));
@@ -383,10 +383,13 @@ describe("project enumeration", () => {
     ).toEqual([project]);
   });
 
-  it("parses only safe forge/org/repo identifiers", () => {
-    expect(parseProjectRepository("github.com/example/widget").cloneUrl).toBe(
-      "https://github.com/example/widget.git",
-    );
-    expect(() => parseProjectRepository("github.com/example/../widget")).toThrow();
+  it("rejects unsafe repository identifiers through project add", () => {
+    const fixture = makeFixture();
+    const runner = createRecordingRunner();
+
+    expect(() =>
+      runProjectAdd(options(fixture, runner, { repository: "github.com/example/../widget" })),
+    ).toThrow("Repository must be <forge>/<org>/<repo>");
+    expect(runner.calls).toEqual([]);
   });
 });

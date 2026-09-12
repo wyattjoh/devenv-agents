@@ -31,17 +31,17 @@ export type ProjectPlatform = "linux" | "darwin";
 /**
  * Templates shipped with devenv-agents for repositories without a devenv file.
  */
-export const PROJECT_TEMPLATES = ["bare", "bun-ts", "deno", "rust"] as const;
+const PROJECT_TEMPLATES = ["bare", "bun-ts", "deno", "rust"] as const;
 
 /**
  * A supported devenv-agents template name.
  */
-export type ProjectTemplate = (typeof PROJECT_TEMPLATES)[number];
+type ProjectTemplate = (typeof PROJECT_TEMPLATES)[number];
 
 /**
  * One project known to the local fleet.
  */
-export type ProjectRegistration = {
+type ProjectRegistration = {
   readonly repo: string;
   readonly path: string;
   readonly session: string;
@@ -50,7 +50,7 @@ export type ProjectRegistration = {
 /**
  * The parsed forge, organization, and repository components of a project.
  */
-export type ProjectRepository = {
+type ProjectRepository = {
   readonly repo: string;
   readonly forge: string;
   readonly organization: string;
@@ -61,7 +61,7 @@ export type ProjectRepository = {
 /**
  * Inputs required to add one project without touching process-global state.
  */
-export type ProjectAddOptions = {
+type ProjectAddOptions = {
   readonly repository: string;
   readonly from: string | undefined;
   readonly local: boolean;
@@ -93,7 +93,7 @@ export type ProjectAddResult = {
 /**
  * Inputs for enumerating registrations on one operating system.
  */
-export type ProjectEnumerationOptions = {
+type ProjectEnumerationOptions = {
   readonly platform: ProjectPlatform;
   readonly homeDirectory: string;
   readonly projectsFile: string | undefined;
@@ -103,7 +103,7 @@ export type ProjectEnumerationOptions = {
 /**
  * Options for writing a Linux Herdr systemd drop-in.
  */
-export type ProjectDropInOptions = {
+type ProjectDropInOptions = {
   readonly project: ProjectRegistration;
   readonly systemdUserDirectory: string;
 };
@@ -111,7 +111,7 @@ export type ProjectDropInOptions = {
 /**
  * Options for writing the Darwin per-user project registry.
  */
-export type ProjectFileOptions = {
+type ProjectFileOptions = {
   readonly project: ProjectRegistration;
   readonly projectsFile: string;
 };
@@ -149,7 +149,7 @@ const templateHint = (): string =>
  * @returns The normalized repository components and clone URL.
  * @throws When the identifier is not exactly forge/org/repo or contains a path traversal segment.
  */
-export const parseProjectRepository = (value: string): ProjectRepository => {
+const parseProjectRepository = (value: string): ProjectRepository => {
   const parts = value.trim().split("/");
   if (
     parts.length !== 3 ||
@@ -426,7 +426,7 @@ export const enumerateProjects = (
  * @param user SSH user name.
  * @returns The phone alias block and Mac machine command.
  */
-export const projectAttachInstructions = (
+const projectAttachInstructions = (
   project: ProjectRegistration,
   host: string = DEFAULT_HOST,
   user: string = "user",
@@ -542,10 +542,3 @@ export const defaultProjectRoots = (): {
   readonly homeDirectory: string;
   readonly templateRoot: string;
 } => ({ homeDirectory: homedir(), templateRoot: DEFAULT_TEMPLATE_ROOT });
-
-/**
- * Returns a human-readable hint for the supported templates.
- *
- * @returns The template list and command shape.
- */
-export const projectTemplateHint = (): string => templateHint();

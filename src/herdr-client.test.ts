@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
-import { CommandFailure, createRecordingRunner } from "./command-runner.ts";
+import { CommandFailure } from "./command-runner.ts";
 import { createHerdrClient } from "./herdr-client.ts";
+import { createRecordingRunner } from "./testing/command-runner.ts";
 
 const fixture = (name: string): string =>
   readFileSync(new URL(`../fixtures/herdr-0.9.0/${name}`, import.meta.url), "utf8");

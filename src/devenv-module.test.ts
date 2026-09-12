@@ -2,11 +2,29 @@ import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { cleanGitEnv } from "./command-runner.ts";
 import { withGitFixture } from "./testing/git-fixture.ts";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const shellTest = fileURLToPath(new URL("../tests/module-shell.test.sh", import.meta.url));
+const gitRepositoryEnvironmentKeys = new Set([
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_COMMON_DIR",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CEILING_DIRECTORIES",
+]);
+
+const withoutGitRepositoryEnvironment = (
+  environment: Readonly<Record<string, string | undefined>>,
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(environment).filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined && !gitRepositoryEnvironmentKeys.has(entry[0]),
+    ),
+  );
 
 const writeEnvironment = (directory: string, agentsRoot: string): void => {
   mkdirSync(`${directory}/.agents`, { recursive: true });
@@ -32,7 +50,7 @@ describe("devenv agents module", () => {
 
       const home = mkdtempSync(`${tmpdir()}/devenv-agents-module-home-`);
       try {
-        const env = cleanGitEnv({
+        const env = withoutGitRepositoryEnvironment({
           ...process.env,
           HOME: home,
           XDG_CACHE_HOME: `${home}/.cache`,

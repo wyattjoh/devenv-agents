@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { defaultDependencies, resolveHostConfiguration, type HostConfiguration } from "./cli.ts";
-import { createRecordingRunner, type CommandResult } from "./command-runner.ts";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { runCli } from "./cli.ts";
+import { PROJECT_PLUGIN_ID } from "./worktree-plugin.ts";
+import { captureOutput, createCliDependencies } from "./testing/cli.ts";
+import { createFakeHerdrClient } from "./testing/herdr-client.ts";
+import { createRecordingRunner, type CommandResult } from "./testing/command-runner.ts";
 
 const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
   exitCode,
@@ -9,64 +14,63 @@ const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
 });
 
 describe("CLI host configuration", () => {
-  it("resolves the CLI environment once into typed host values", () => {
-    const environment = {
-      PROJECT_PLATFORM: "linux",
-      PROJECT_HOME: "/fixture/home",
-      HOME: "/ignored/home",
-      PROJECT_PROJECTS_FILE: "/fixture/projects.toml",
-      PROJECT_SYSTEMD_USER_DIRECTORY: "/fixture/systemd",
-      PROJECT_CODE_ROOT: "/fixture/code",
-      PROJECT_TEMPLATE_ROOT: "/fixture/templates",
-      PROJECT_HOST: "fixture-host",
-      USER: "fixture-user",
-      USERNAME: "ignored-user",
-      HERDR_BIN_PATH: "/fixture/herdr",
-      HERDR_PLUGIN_EVENT_JSON: '{"workspace_id":"fixture-workspace"}',
-      HERDR_WORKSPACE_ID: "fixture-workspace",
-    };
+  it("uses the resolved host and user through the public add command", () => {
+    const root = mkdtempSync(join("/tmp", "devenv-agents-cli-host-"));
+    const home = join(root, "home");
+    const code = join(root, "code");
+    const checkout = join(code, "github.com", "example", "widget");
+    const projectsFile = join(root, "projects.toml");
+    mkdirSync(checkout, { recursive: true });
+    writeFileSync(join(checkout, "devenv.nix"), "{ }: {}\n");
 
-    const configuration: HostConfiguration = resolveHostConfiguration(environment);
+    try {
+      const output = captureOutput();
+      const runner = createRecordingRunner({ devenv: result(0) });
+      const dependencies = createCliDependencies({
+        runner,
+        herdrClient: createFakeHerdrClient({
+          listPlugins: () => [
+            {
+              pluginId: PROJECT_PLUGIN_ID,
+              enabled: true,
+              pluginRoot: undefined,
+              manifestPath: undefined,
+              version: "0.1.0",
+            },
+          ],
+        }),
+        environment: {
+          PROJECT_PLATFORM: "darwin",
+          PROJECT_HOME: home,
+          PROJECT_CODE_ROOT: code,
+          PROJECT_PROJECTS_FILE: projectsFile,
+          PROJECT_HOST: "fixture-host",
+          USER: "fixture-user",
+        },
+      });
 
-    expect(configuration).toEqual({
-      platform: "linux",
-      homeDirectory: "/fixture/home",
-      projectsFile: "/fixture/projects.toml",
-      systemdUserDirectory: "/fixture/systemd",
-      codeRoot: "/fixture/code",
-      templateRoot: "/fixture/templates",
-      host: "fixture-host",
-      user: "fixture-user",
-      herdrBinPath: "/fixture/herdr",
-      eventJson: '{"workspace_id":"fixture-workspace"}',
-      workspaceId: "fixture-workspace",
-    });
+      expect(runCli(["add", "github.com/example/widget"], output.io, dependencies)).toBe(0);
+      expect(output.stdout()).toContain("Host fixture-host-widget");
+      expect(output.stdout()).toContain("  User fixture-user");
+      expect(output.stderr()).toBe("");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
-  it("uses an injected environment for default Herdr dependencies", () => {
-    const runner = createRecordingRunner({
-      "/fixture/herdr plugin list --json": result(0, '{"result":{"plugins":[]}}'),
+  it("rejects an unsupported platform before dispatching through runCli", () => {
+    const output = captureOutput();
+    const runner = createRecordingRunner();
+    const dependencies = createCliDependencies({
+      runner,
+      environment: { PROJECT_PLATFORM: "freebsd" },
     });
-    const environment = {
-      PROJECT_PLATFORM: "darwin",
-      HERDR_BIN_PATH: "/fixture/herdr",
-    };
-    const dependencies = defaultDependencies(environment, runner);
 
-    expect(dependencies.herdrClient.listPlugins()).toEqual([]);
-    expect(runner.calls).toEqual([
-      {
-        command: "/fixture/herdr",
-        args: ["plugin", "list", "--json"],
-        cwd: undefined,
-        env: undefined,
-      },
-    ]);
-  });
-
-  it("rejects an unsupported platform during host resolution", () => {
-    expect(() => resolveHostConfiguration({ PROJECT_PLATFORM: "freebsd" })).toThrow(
-      "PROJECT_PLATFORM must be either linux or darwin, got 'freebsd'",
+    expect(runCli(["--help"], output.io, dependencies)).toBe(1);
+    expect(output.stdout()).toBe("");
+    expect(output.stderr()).toBe(
+      "project: PROJECT_PLATFORM must be either linux or darwin, got 'freebsd'\n",
     );
+    expect(runner.calls).toEqual([]);
   });
 });

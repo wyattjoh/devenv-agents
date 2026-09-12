@@ -9,12 +9,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import {
-  createRecordingRunner,
-  type CommandInvocation,
-  type CommandResult,
-  type RecordingRunner,
-} from "./command-runner.ts";
 import type { HerdrClient, HerdrWorktree } from "./herdr-client.ts";
 import type { WorktreeBootstrap, WorktreeBootstrapInspection } from "./worktree-bootstrap.ts";
 import { runCli } from "./cli.ts";
@@ -29,6 +23,12 @@ import {
 } from "./project-gc.ts";
 import { formatProjectUpdate, runProjectUpdate } from "./project-update.ts";
 import { createGitFixture } from "./testing/git-fixture.ts";
+import {
+  createRecordingRunner,
+  type CommandInvocation,
+  type CommandResult,
+  type RecordingRunner,
+} from "./testing/command-runner.ts";
 import { spawnGit } from "./testing/git-env.ts";
 import { samePath } from "./workspace.ts";
 

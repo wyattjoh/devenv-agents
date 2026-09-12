@@ -1,13 +1,9 @@
-import { cleanGitEnv } from "../command-runner.ts";
+import { defaultCommandRunner, runGitCommand } from "../command-runner.ts";
 
 /**
  * The captured result of a Git process.
  */
-export type GitResult = {
-  readonly exitCode: number;
-  readonly stdout: string;
-  readonly stderr: string;
-};
+export type GitResult = ReturnType<typeof runGitCommand>;
 
 /**
  * Optional settings for a sanitized Git spawn.
@@ -28,16 +24,5 @@ export const spawnGit = (
   args: readonly string[],
   options: SpawnGitOptions | undefined = undefined,
 ): GitResult => {
-  const result = Bun.spawnSync(["git", ...args], {
-    ...(options?.cwd === undefined ? {} : { cwd: options.cwd }),
-    env: cleanGitEnv(options?.env ?? process.env),
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
-  return {
-    exitCode: result.exitCode,
-    stdout: result.stdout.toString(),
-    stderr: result.stderr.toString(),
-  };
+  return runGitCommand(defaultCommandRunner, args, options?.cwd, options?.env);
 };

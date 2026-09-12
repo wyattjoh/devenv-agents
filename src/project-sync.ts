@@ -19,19 +19,19 @@ import { readProjectDeclaration, type ProjectDeclaration } from "./project-decla
 import { resolveMainCheckout } from "./workspace.ts";
 
 /** The local Claude settings file populated by tree grants. */
-export const CLAUDE_LOCAL_SETTINGS_PATH = join(".claude", "settings.local.json");
+const CLAUDE_LOCAL_SETTINGS_PATH = join(".claude", "settings.local.json");
 
 /** The local devenv overlay populated by module grants. */
-export const DEVENV_LOCAL_YAML_PATH = "devenv.local.yaml";
+const DEVENV_LOCAL_YAML_PATH = "devenv.local.yaml";
 
 /** The shared environment file populated by service grants. */
-export const REFERENCES_ENV_PATH = join(".devenv", "state", "references.env");
+const REFERENCES_ENV_PATH = join(".devenv", "state", "references.env");
 
 /** The fallback host for services running on the same machine. */
-export const DEFAULT_SERVICE_HOST = "localhost";
+const DEFAULT_SERVICE_HOST = "localhost";
 
 /** A resolved endpoint for one scoped service. */
-export type ServiceEndpoint = {
+type ServiceEndpoint = {
   readonly host: string;
   readonly port: number;
 };
@@ -43,14 +43,14 @@ export type ServiceEndpoint = {
  * through devenv, while tests can provide deterministic endpoint data without
  * starting a development environment.
  */
-export type ServiceEndpointResolver = (
+type ServiceEndpointResolver = (
   projectRoot: string,
   serviceName: string,
   runner: CommandRunner,
 ) => ServiceEndpoint;
 
 /** Dependencies that vary while materializing one project's references. */
-export type ProjectSyncOptions = {
+type ProjectSyncOptions = {
   readonly codeRoot?: string;
   readonly homeDirectory?: string;
   readonly platform?: NodeJS.Platform;
@@ -59,7 +59,7 @@ export type ProjectSyncOptions = {
 };
 
 /** The result of a successful reference synchronization. */
-export type ProjectSyncResult = {
+type ProjectSyncResult = {
   readonly treeDirectories: readonly string[];
   readonly moduleInputs: readonly string[];
   readonly serviceEndpoints: readonly string[];
@@ -73,7 +73,7 @@ export type ProjectSyncResult = {
  * @param worktreePath Worktree receiving tree and module grants.
  * @param declaration Parsed project declaration to materialize.
  */
-export type SyncRequest = {
+type SyncRequest = {
   readonly projectRoot: string;
   readonly worktreePath: string;
   readonly declaration: ProjectDeclaration;
@@ -90,14 +90,14 @@ export type SyncReferences = {
 };
 
 /** Options for invoking `project sync` from a checkout path. */
-export type ProjectSyncCommandOptions = {
+type ProjectSyncCommandOptions = {
   readonly worktreePath: string;
   readonly runner: CommandRunner;
   readonly syncReferences?: SyncReferences;
 };
 
 /** One checkout that could not be found under the machine's code root. */
-export type MissingReferencedCheckout = {
+type MissingReferencedCheckout = {
   readonly repo: string;
   readonly path: string;
 };
@@ -108,7 +108,7 @@ export type MissingReferencedCheckout = {
  * Missing checkouts are kept together so one sync reports every unavailable
  * sibling rather than stopping at the first declaration entry.
  */
-export class MissingReferencedCheckoutsError extends Error {
+class MissingReferencedCheckoutsError extends Error {
   readonly missingReferences: readonly MissingReferencedCheckout[];
 
   constructor(missingReferences: readonly MissingReferencedCheckout[]) {
@@ -652,7 +652,7 @@ const materializeServices = (
  * @returns Materialized paths when all declared checkouts are available.
  * @throws {@link MissingReferencedCheckoutsError} after partial materialization.
  */
-export const syncProjectReferences = (
+const syncProjectReferences = (
   request: SyncRequest,
   suppliedOptions: ProjectSyncOptions = {},
 ): ProjectSyncResult => {
@@ -709,9 +709,6 @@ export const createSyncReferences =
   (request) => {
     syncProjectReferences(request, options);
   };
-
-/** The default materializing adapter used by setup and CLI commands. */
-export const syncReferences: SyncReferences = createSyncReferences();
 
 /**
  * Resolves a checkout from the current path and runs the materializing sync.
