@@ -129,6 +129,19 @@ describe("project update", () => {
     expect(formatProjectUpdate(update)).toContain(
       `Worktree (${worktrees[0]}): failed: devenv shell -- true`,
     );
+    expect(
+      runner.calls
+        .filter((call) => call.command === "devenv" || call.command === "direnv")
+        .map((call) => [call.command, ...call.args]),
+    ).toEqual([
+      ["devenv", "update", "agents"],
+      ["direnv", "allow"],
+      ["devenv", "shell", "--", "true"],
+      ["direnv", "allow"],
+      ["devenv", "shell", "--", "true"],
+      ["direnv", "allow"],
+      ["devenv", "shell", "--", "true"],
+    ]);
   });
 
   it("updates a deleted linked worktree from a symlinked project path", () => {

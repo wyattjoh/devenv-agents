@@ -1,5 +1,6 @@
 import { errorMessage, runRequiredCommand, type CommandRunner } from "./command-runner.ts";
 import { listLinkedWorktrees, resolveMainCheckout, type WorkspaceWorktree } from "./workspace.ts";
+import { warmWorktree } from "./worktree-bootstrap.ts";
 
 /**
  * The operation represented by one project-update report item.
@@ -48,6 +49,26 @@ const runDevenv = (
   }
 };
 
+const runWarmup = (
+  runner: CommandRunner,
+  kind: "main" | "worktree",
+  mainCheckout: string,
+  worktreePath: string,
+): ProjectUpdateItem => {
+  try {
+    warmWorktree({
+      mainCheckout,
+      worktreePath,
+      runner,
+      devenvTemplate: undefined,
+      missingDevenvError: undefined,
+    });
+    return { kind, path: worktreePath, success: true, error: undefined };
+  } catch (error) {
+    return { kind, path: worktreePath, success: false, error: errorMessage(error) };
+  }
+};
+
 /**
  * Updates the agents input and rebuilds a project's main checkout and every
  * linked Git worktree. A failed step is captured and does not stop later
@@ -69,15 +90,7 @@ export const runProjectUpdate = (options: ProjectUpdateOptions): ProjectUpdateRe
     ),
   );
 
-  items.push(
-    runDevenv(
-      options.runner,
-      "main",
-      mainCheckout,
-      ["shell", "--", "true"],
-      "devenv shell -- true",
-    ),
-  );
+  items.push(runWarmup(options.runner, "main", mainCheckout, mainCheckout));
 
   let worktrees: readonly WorkspaceWorktree[];
   try {
@@ -92,15 +105,7 @@ export const runProjectUpdate = (options: ProjectUpdateOptions): ProjectUpdateRe
     return { mainCheckout, items, exitCode: 1 };
   }
   for (const worktree of worktrees) {
-    items.push(
-      runDevenv(
-        options.runner,
-        "worktree",
-        worktree.path,
-        ["shell", "--", "true"],
-        "devenv shell -- true",
-      ),
-    );
+    items.push(runWarmup(options.runner, "worktree", mainCheckout, worktree.path));
   }
 
   return {

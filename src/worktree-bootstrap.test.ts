@@ -7,6 +7,7 @@ import {
   inspectWorktreeBootstrap,
   requestWorktreeBootstrap,
   runWorktreeBootstrap,
+  warmWorktree,
   type WorktreeBootstrapRunOptions,
 } from "./worktree-bootstrap.ts";
 import {
@@ -148,6 +149,29 @@ describe("worktree bootstrap", () => {
         ["direnv", "allow"],
         ["devenv", "shell", "--", "true"],
       ]);
+    }, fixtureOptions);
+  });
+
+  it("warms the main checkout through the shared path without self-linking", () => {
+    withGitFixture((fixture) => {
+      prepareFixture(fixture);
+      writeFileSync(join(fixture.repository, "devenv.nix"), "{ pkgs, ... }: {}\n");
+      const runner = createRecordingRunner({ devenv: result(0) });
+
+      warmWorktree({
+        mainCheckout: fixture.repository,
+        worktreePath: fixture.repository,
+        runner,
+        devenvTemplate: undefined,
+        missingDevenvError: undefined,
+      });
+
+      expect(runner.calls.map((call) => [call.command, ...call.args])).toEqual([
+        ["devenv", "allow"],
+        ["direnv", "allow"],
+        ["devenv", "shell", "--", "true"],
+      ]);
+      expect(lstatSync(join(fixture.repository, "devenv.local.nix")).isSymbolicLink()).toBe(false);
     }, fixtureOptions);
   });
 

@@ -151,6 +151,15 @@ export type WorktreeBootstrapAwaitResult = {
 };
 
 /**
+ * Options for warming a checkout's devenv and direnv environment.
+ */
+export type WorktreeBootstrapWarmOptions = WorktreeBootstrapTarget & {
+  readonly runner: CommandRunner;
+  readonly devenvTemplate: string | undefined;
+  readonly missingDevenvError: string | undefined;
+};
+
+/**
  * Options for inspecting a bootstrap.
  */
 export type WorktreeBootstrapInspectOptions = WorktreeBootstrapTarget;
@@ -474,6 +483,8 @@ const hasDevenvFile = (worktreePath: string): boolean =>
   ["devenv.nix", "devenv.yaml", "devenv.yml"].some((file) => existsSync(join(worktreePath, file)));
 
 const linkLocalLayer = (mainCheckout: string, worktreePath: string): void => {
+  if (samePath(mainCheckout, worktreePath)) return;
+
   const source = join(mainCheckout, "devenv.local.nix");
   if (!existsSync(source)) return;
 
@@ -614,20 +625,43 @@ export const requestWorktreeBootstrap = (
   options: WorktreeBootstrapRequestOptions,
 ): WorktreeBootstrapRequestResult => requestOnce(options);
 
-const warmWorktree = (mainCheckout: string, worktreePath: string, runner: CommandRunner): void => {
-  if (hasDevenvFile(worktreePath)) {
-    runRequiredCommand(runner, "devenv allow", "devenv", ["allow"], {
-      cwd: worktreePath,
+/**
+ * Warms one checkout through the shared devenv and direnv ritual.
+ *
+ * A checkout with devenv files receives a plain `devenv allow`; a checkout
+ * without them can use a validated template source. The optional missing-file
+ * error lets project add preserve its template hint while bootstrap and update
+ * continue to support environments that do not have a devenv file.
+ *
+ * @param options Main checkout, target worktree, command runner, and template policy.
+ * @returns Nothing; approval, linking, and noninteractive warming happen in order.
+ * @throws When an external command fails or the caller supplies a missing-file error.
+ */
+export const warmWorktree = (options: WorktreeBootstrapWarmOptions): void => {
+  if (hasDevenvFile(options.worktreePath)) {
+    runRequiredCommand(options.runner, "devenv allow", "devenv", ["allow"], {
+      cwd: options.worktreePath,
       env: undefined,
     });
+  } else if (options.devenvTemplate !== undefined) {
+    runRequiredCommand(
+      options.runner,
+      "devenv template allow",
+      "devenv",
+      ["--from", options.devenvTemplate, "allow"],
+      { cwd: options.worktreePath, env: undefined },
+    );
+  } else if (options.missingDevenvError !== undefined) {
+    throw new Error(options.missingDevenvError);
   }
-  runRequiredCommand(runner, "direnv allow", "direnv", ["allow"], {
-    cwd: worktreePath,
+
+  runRequiredCommand(options.runner, "direnv allow", "direnv", ["allow"], {
+    cwd: options.worktreePath,
     env: undefined,
   });
-  linkLocalLayer(mainCheckout, worktreePath);
-  runRequiredCommand(runner, "devenv shell -- true", "devenv", ["shell", "--", "true"], {
-    cwd: worktreePath,
+  linkLocalLayer(options.mainCheckout, options.worktreePath);
+  runRequiredCommand(options.runner, "devenv shell -- true", "devenv", ["shell", "--", "true"], {
+    cwd: options.worktreePath,
     env: undefined,
   });
 };
@@ -671,7 +705,13 @@ const runOnce = (options: ResolvedWorktreeBootstrapRunOptions): WorktreeBootstra
   try {
     claim.write("running", undefined, undefined);
     const declaration = readProjectDeclaration(options.mainCheckout);
-    warmWorktree(options.mainCheckout, options.worktreePath, options.runner);
+    warmWorktree({
+      mainCheckout: options.mainCheckout,
+      worktreePath: options.worktreePath,
+      runner: options.runner,
+      devenvTemplate: undefined,
+      missingDevenvError: undefined,
+    });
     options.syncReferences({
       projectRoot: options.mainCheckout,
       worktreePath: options.worktreePath,

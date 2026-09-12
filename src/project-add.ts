@@ -21,6 +21,7 @@ import type { HerdrClient } from "./herdr-client.ts";
 import { assertProjectPluginEnabled } from "./worktree-plugin.ts";
 import { readProjectDeclaration, type ProjectDeclaration } from "./project-declaration.ts";
 import type { SyncReferences } from "./project-sync.ts";
+import { warmWorktree } from "./worktree-bootstrap.ts";
 
 /**
  * Operating systems supported by the project registry.
@@ -193,9 +194,6 @@ const projectSession = (repository: ProjectRepository, declaration: ProjectDecla
   }
   return session;
 };
-
-const hasDevenvFile = (projectPath: string): boolean =>
-  ["devenv.nix", "devenv.yaml", "devenv.yml"].some((file) => existsSync(join(projectPath, file)));
 
 const templatePath = (templateRoot: string, template: string): string => {
   if (!isProjectTemplate(template)) {
@@ -452,30 +450,6 @@ const projectTemplate = (from: string | undefined, templateRoot: string): string
   return `path:${directory}`;
 };
 
-const prepareDevenv = (
-  projectPath: string,
-  from: string | undefined,
-  templateRoot: string,
-  runner: CommandRunner,
-): void => {
-  const template = projectTemplate(from, templateRoot);
-  if (hasDevenvFile(projectPath)) {
-    runRequiredCommand(runner, "devenv allow", "devenv", ["allow"], {
-      cwd: projectPath,
-      env: undefined,
-    });
-    return;
-  }
-  if (template === undefined) {
-    throw new Error(`No devenv files found in ${projectPath}. ${templateHint()}`);
-  }
-  // `allow` persists the --from binding for later commands in this checkout.
-  runRequiredCommand(runner, "devenv template allow", "devenv", ["--from", template, "allow"], {
-    cwd: projectPath,
-    env: undefined,
-  });
-};
-
 const registerProject = (
   project: ProjectRegistration,
   options: ProjectAddOptions,
@@ -522,26 +496,23 @@ const registerProject = (
 export const runProjectAdd = (options: ProjectAddOptions): ProjectAddResult => {
   assertProjectPluginEnabled(options.herdrClient);
   const repository = parseProjectRepository(options.repository);
-  if (options.from !== undefined) templatePath(options.templateRoot, options.from);
+  const template = projectTemplate(options.from, options.templateRoot);
   const codeRoot = resolve(
     options.codeRoot ?? projectCodeRoot(options.platform, options.homeDirectory),
   );
   const checkoutPath = join(codeRoot, repository.forge, repository.organization, repository.name);
   const checkoutCreated = ensureCheckout(repository, checkoutPath, codeRoot, options.runner);
 
-  prepareDevenv(checkoutPath, options.from, options.templateRoot, options.runner);
-  runRequiredCommand(options.runner, "direnv allow", "direnv", ["allow"], {
-    cwd: checkoutPath,
-    env: undefined,
-  });
   const declaration: ProjectDeclaration = readProjectDeclaration(checkoutPath);
   const session = projectSession(repository, declaration);
   ensureLocalLayer(checkoutPath);
   writeInfoExcludes(checkoutPath);
-  // Warm the profile without opening an interactive nested shell.
-  runRequiredCommand(options.runner, "devenv shell -- true", "devenv", ["shell", "--", "true"], {
-    cwd: checkoutPath,
-    env: undefined,
+  warmWorktree({
+    mainCheckout: checkoutPath,
+    worktreePath: checkoutPath,
+    runner: options.runner,
+    devenvTemplate: template,
+    missingDevenvError: `No devenv files found in ${checkoutPath}. ${templateHint()}`,
   });
 
   options.syncReferences({
