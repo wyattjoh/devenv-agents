@@ -1,6 +1,7 @@
 version: 2
 
 updates:
+  # Keep bun.lock at version 0 until Dependabot's Bun updater supports version 2.
   - package-ecosystem: bun
     directory: /
     schedule:

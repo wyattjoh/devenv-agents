@@ -69,8 +69,11 @@ nix build .#herdr-plugin
 source entrypoint. The Nix build creates the standalone `project` binary but it
 is not run by the test suite. Pull requests run the Bun gates above and the
 cross-platform template matrix. Dependabot groups weekly patch and minor Bun
-updates, keeps Bun majors separate, and groups GitHub Actions updates. A weekly
-Actions workflow opens the Nix lockfile pull request; because it uses
+updates, keeps Bun majors separate, and groups GitHub Actions updates. Keep
+`bun.lock` at lockfile version 0 until Dependabot supports version 2; both
+Dependabot's Bun 1.1.39 and current Bun releases can read version 0. A weekly
+Actions workflow opens
+the Nix lockfile pull request; because it uses
 `GITHUB_TOKEN`, its pull-request checks require manual workflow approval.
 
 GitHub Actions must be pinned to full commit SHAs with their release tags in

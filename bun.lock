@@ -1,9 +1,7 @@
 {
-  "lockfileVersion": 2,
-  "configVersion": 1,
+  "lockfileVersion": 0,
   "workspaces": {
     "": {
-      "name": "devenv-agents",
       "devDependencies": {
         "@types/bun": "1.4.2",
         "@types/node": "^26.5.1",
