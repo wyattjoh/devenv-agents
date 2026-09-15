@@ -13,6 +13,19 @@
         "aarch64-linux"
       ];
       forEachSystem = nixpkgs.lib.genAttrs systems;
+      projectSource = nixpkgs.lib.cleanSourceWith {
+        src = ./.;
+        filter =
+          path: type:
+          nixpkgs.lib.cleanSourceFilter path type
+          && !(builtins.elem (baseNameOf path) [
+            ".devenv"
+            ".direnv"
+            ".scratch"
+            "dist"
+            "node_modules"
+          ]);
+      };
     in
     {
       packages = forEachSystem (
@@ -26,7 +39,7 @@
           project = pkgs.stdenvNoCC.mkDerivation {
             pname = "project";
             version = "0.1.0";
-            src = ./.;
+            src = projectSource;
             nativeBuildInputs = [ pkgs.bun pkgs.makeWrapper ];
             dontConfigure = true;
             dontStrip = true;
@@ -42,7 +55,7 @@
               runHook preInstall
               install -Dm755 ./project "$out/bin/project-real"
               mkdir -p "$out/share/devenv-agents/templates"
-              cp -R ${./templates}/. "$out/share/devenv-agents/templates/"
+              cp -R ./templates/. "$out/share/devenv-agents/templates/"
               makeWrapper "$out/bin/project-real" "$out/bin/project" \
                 --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.direnv ]}" \
                 --set DEVENV_AGENTS_PLUGIN_PATH "${herdrPlugin}" \
