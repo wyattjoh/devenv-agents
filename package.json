@@ -19,6 +19,7 @@
   },
   "dependencies": {},
   "devDependencies": {
+    "@oxlint/plugins": "1.83.0",
     "@types/bun": "1.4.2",
     "@types/node": "^26.5.1",
     "oxfmt": "^0.68.0",
