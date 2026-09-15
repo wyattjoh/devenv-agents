@@ -1,6 +1,14 @@
 import { runCommand, runRequiredCommand, type CommandRunner } from "./command-runner.ts";
 
-type JsonRecord = Record<string, unknown>;
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
+
+type JsonRecord = { readonly [key: string]: JsonValue };
 
 /**
  * A worktree reported by Herdr, with protocol names normalized for callers.
@@ -209,33 +217,43 @@ export interface HerdrClient {
 }
 
 const isRecord = (value: unknown): value is JsonRecord =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+  value !== null && !Array.isArray(value) && value === Object(value);
+
+const isString = (value: unknown): value is string => value === String(value);
 
 const readString = (record: JsonRecord, key: string): string | undefined => {
   const value = record[key];
-  return typeof value === "string" ? value : undefined;
+
+  return isString(value) ? value : undefined;
 };
 
 const readRecord = (record: JsonRecord, key: string): JsonRecord | undefined => {
   const value = record[key];
+
   return isRecord(value) ? value : undefined;
 };
 
 const normalizeBranch = (branch: string | undefined): string | undefined => {
   if (branch === undefined) return undefined;
+
   return branch.startsWith("refs/heads/") ? branch.slice("refs/heads/".length) : branch;
 };
 
 const parseEnvelopeResult = (stdout: string, operation: string): JsonRecord => {
   let parsed: unknown;
+
   try {
+    // SAFETY: The JSON result is validated as a protocol envelope below.
     parsed = JSON.parse(stdout) as unknown;
   } catch (error) {
     throw new Error(`${operation} returned invalid JSON`, { cause: error });
   }
+
   if (!isRecord(parsed)) throw new Error(`${operation} returned an invalid envelope`);
   const result = readRecord(parsed, "result");
+
   if (result === undefined) throw new Error(`${operation} returned no results`);
+
   return result;
 };
 
@@ -243,12 +261,15 @@ const parseWorktrees = (stdout: string): readonly HerdrWorktree[] => {
   const operation = "herdr worktree list";
   const result = parseEnvelopeResult(stdout, operation);
   const worktrees = result.worktrees;
+
   if (!Array.isArray(worktrees)) throw new Error(`${operation} returned no results`);
 
   return worktrees.flatMap((value) => {
     if (!isRecord(value)) return [];
     const path = readString(value, "path");
+
     if (path === undefined || path.length === 0) return [];
+
     return [
       {
         path,
@@ -266,6 +287,7 @@ const parseCreateWorktree = (stdout: string): HerdrWorktreeCreateResult => {
   const result = parseEnvelopeResult(stdout, operation);
   const workspaceId = readString(readRecord(result, "workspace") ?? {}, "workspace_id");
   const rootPaneId = readString(readRecord(result, "root_pane") ?? {}, "pane_id");
+
   if (
     workspaceId === undefined ||
     workspaceId.length === 0 ||
@@ -274,6 +296,7 @@ const parseCreateWorktree = (stdout: string): HerdrWorktreeCreateResult => {
   ) {
     throw new Error(`${operation} returned no results`);
   }
+
   return { workspaceId, rootPaneId };
 };
 
@@ -281,12 +304,15 @@ const parsePlugins = (stdout: string): readonly HerdrPlugin[] => {
   const operation = "herdr plugin list";
   const result = parseEnvelopeResult(stdout, operation);
   const plugins = result.plugins;
+
   if (!Array.isArray(plugins)) throw new Error(`${operation} returned no results`);
 
   return plugins.flatMap((value) => {
     if (!isRecord(value)) return [];
     const pluginId = readString(value, "plugin_id");
+
     if (pluginId === undefined || pluginId.length === 0) return [];
+
     return [
       {
         pluginId,
@@ -303,12 +329,15 @@ const parsePanes = (stdout: string): readonly HerdrPane[] => {
   const operation = "herdr pane list";
   const result = parseEnvelopeResult(stdout, operation);
   const panes = result.panes;
+
   if (!Array.isArray(panes)) throw new Error(`${operation} returned no results`);
 
   return panes.flatMap((value) => {
     if (!isRecord(value)) return [];
     const paneId = readString(value, "pane_id");
+
     if (paneId === undefined || paneId.length === 0) return [];
+
     return [{ paneId, cwd: readString(value, "cwd") }];
   });
 };
@@ -330,6 +359,7 @@ export const createHerdrClient = (
   herdrPath: string | undefined = undefined,
 ): HerdrClient => {
   const command = herdrPath ?? "herdr";
+
   const listWorktrees = (
     options: HerdrWorktreeListOptions = { cwd: undefined, workspaceId: undefined },
   ): readonly HerdrWorktree[] => {
@@ -344,6 +374,7 @@ export const createHerdrClient = (
       ],
       { cwd: options.cwd, env: undefined },
     );
+
     return parseWorktrees(result.stdout);
   };
 
@@ -379,6 +410,7 @@ export const createHerdrClient = (
         ],
         { cwd: options.cwd, env: undefined },
       );
+
       return parseCreateWorktree(result.stdout);
     },
     openWorktree: (options) => {
@@ -439,6 +471,7 @@ export const createHerdrClient = (
         "list",
         "--json",
       ]);
+
       return parsePlugins(result.stdout);
     },
     linkPlugin: (pluginRoot) => {
@@ -458,7 +491,9 @@ export const createHerdrClient = (
     listPanes: () => {
       try {
         const result = runCommand(runner, command, ["pane", "list"]);
+
         if (result.exitCode !== 0) return [];
+
         return parsePanes(result.stdout);
       } catch {
         return [];

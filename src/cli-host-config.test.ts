@@ -26,6 +26,7 @@ describe("CLI host configuration", () => {
     try {
       const output = captureOutput();
       const runner = createRecordingRunner({ devenv: result(0) });
+
       const dependencies = createCliDependencies({
         runner,
         herdrClient: createFakeHerdrClient({
@@ -61,6 +62,7 @@ describe("CLI host configuration", () => {
   it("rejects an unsupported platform before dispatching through runCli", () => {
     const output = captureOutput();
     const runner = createRecordingRunner();
+
     const dependencies = createCliDependencies({
       runner,
       environment: { PROJECT_PLATFORM: "freebsd" },

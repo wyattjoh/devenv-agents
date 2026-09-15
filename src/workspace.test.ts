@@ -17,6 +17,7 @@ const realCommandRunner = defaultCommandRunner;
 
 const requireGit = (repository: string, args: readonly string[], operation: string): void => {
   const result = spawnGit(["-C", repository, ...args]);
+
   if (result.exitCode === 0) return;
   throw new Error(
     `${operation} failed with exit code ${result.exitCode}: ${result.stderr.trim() || result.stdout.trim()}`,
@@ -104,6 +105,7 @@ describe("project workspace", () => {
   it("compares symlinked roots and paths with missing segments by identity", () => {
     const root = mkdtempSync("/tmp/devenv-agents-workspace-path-");
     const symlinkedRoot = `${root}-alias`;
+
     try {
       const existingParent = join(root, "existing");
       const missingDirectory = join(existingParent, "missing");
@@ -141,8 +143,10 @@ describe("project workspace", () => {
 
   it("surfaces Git's standard command failure outside a repository", () => {
     const directory = mkdtempSync("/tmp/devenv-agents-workspace-outside-");
+
     try {
       let failure: unknown;
+
       try {
         resolveMainCheckout(directory, realCommandRunner);
       } catch (error) {
@@ -158,11 +162,14 @@ describe("project workspace", () => {
 
   it("treats empty Git resolution output as a standard command failure", () => {
     const directory = mkdtempSync("/tmp/devenv-agents-workspace-empty-");
+
     try {
       const runner = createRecordingRunner({
         git: { exitCode: 0, stdout: "", stderr: "" },
       });
+
       let failure: unknown;
+
       try {
         resolveMainCheckout(directory, runner);
       } catch (error) {

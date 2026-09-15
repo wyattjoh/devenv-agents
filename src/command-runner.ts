@@ -129,7 +129,9 @@ const environmentForInvocation = (
   if (invocation.command === "git") {
     return cleanGitEnv({ ...process.env, ...invocation.env });
   }
+
   if (invocation.env === undefined) return undefined;
+
   return inheritedEnvironment(invocation.env);
 };
 
@@ -139,17 +141,22 @@ const environmentForInvocation = (
 const realCommandRunner: CommandRunner = {
   run: (invocation) => {
     const environment = environmentForInvocation(invocation);
-    const result = Bun.spawnSync([invocation.command, ...invocation.args], {
-      ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
-      ...(environment === undefined ? {} : { env: environment }),
+
+    const spawnOptions: Parameters<typeof Bun.spawnSync>[1] = {
       stdout: "pipe",
       stderr: "pipe",
-    });
+    };
+
+    if (invocation.cwd !== undefined) spawnOptions.cwd = invocation.cwd;
+
+    if (environment !== undefined) spawnOptions.env = environment;
+
+    const result = Bun.spawnSync([invocation.command, ...invocation.args], spawnOptions);
 
     return {
       exitCode: result.exitCode,
-      stdout: result.stdout.toString(),
-      stderr: result.stderr.toString(),
+      stdout: result.stdout?.toString() ?? "",
+      stderr: result.stderr?.toString() ?? "",
     };
   },
 };
@@ -187,8 +194,8 @@ export const runCommand = (
  * @param error Value thrown by an operation.
  * @returns The Error message or the string representation of the value.
  */
-export const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+export const errorMessage = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : String(cause);
 
 /**
  * Runs one command and throws when it exits unsuccessfully.
@@ -209,7 +216,9 @@ export const runRequiredCommand = (
   options: CommandOptions | undefined = undefined,
 ): CommandResult => {
   const result = runCommand(runner, command, args, options);
+
   if (result.exitCode !== 0) throw new CommandFailure(label, result);
+
   return result;
 };
 

@@ -45,9 +45,11 @@ const worktreePathForBranch = (mainCheckout: string, branch: string): string => 
   const root = getManagedWorktreeRoot(mainCheckout);
   const path = resolve(root, branch);
   const relativePath = relative(root, path);
+
   if (relativePath.length === 0 || relativePath === ".." || relativePath.startsWith(`..${sep}`)) {
     throw new Error("worktree branch must stay under .claude/worktrees");
   }
+
   return path;
 };
 
@@ -61,6 +63,7 @@ export const runWorktreeCreate = (options: WorktreeCreateOptions): WorktreeCreat
   assertProjectPluginEnabled(options.herdrClient);
   const mainCheckout = resolveMainCheckout(options.cwd, options.runner);
   const worktreePath = worktreePathForBranch(mainCheckout, options.branch);
+
   const ids = options.herdrClient.createWorktree({
     cwd: mainCheckout,
     branch: options.branch,
@@ -69,13 +72,17 @@ export const runWorktreeCreate = (options: WorktreeCreateOptions): WorktreeCreat
     label: worktreeLabel(options.branch),
     focus: options.noFocus ? "no-focus" : options.focus ? "focus" : undefined,
   });
+
   const bootstrap = options.bootstrap.await({
     mainCheckout,
     worktreePath,
     deadline: options.deadline,
     sleep: options.sleep,
   });
+
   if (bootstrap.state === "timeout") throw new Error("worktree bootstrap timed out");
+
   if (bootstrap.state === "failed") throw bootstrap.error;
+
   return { ...ids, branch: options.branch, worktreePath };
 };

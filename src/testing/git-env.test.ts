@@ -25,6 +25,7 @@ const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
 describe("runGitCommand", () => {
   it("removes repository variables, preserves identity, and omits undefined values", () => {
     const runner = createRecordingRunner({ git: result(0) });
+
     const env = {
       PATH: "/usr/bin",
       HOME: "/home/test",
@@ -62,6 +63,7 @@ describe("runGitCommand", () => {
     withGitFixture(
       (fixture) => {
         const decoy = join(fixture.root, "decoy");
+
         const values: Record<(typeof GIT_LOCATION_VARIABLES)[number], string> = {
           GIT_DIR: join(decoy, ".git"),
           GIT_WORK_TREE: decoy,
@@ -71,7 +73,9 @@ describe("runGitCommand", () => {
           GIT_ALTERNATE_OBJECT_DIRECTORIES: join(decoy, "objects"),
           GIT_CEILING_DIRECTORIES: decoy,
         };
+
         const previous = new Map<string, string | undefined>();
+
         for (const key of GIT_LOCATION_VARIABLES) previous.set(key, process.env[key]);
 
         try {
@@ -88,6 +92,7 @@ describe("runGitCommand", () => {
         } finally {
           for (const key of GIT_LOCATION_VARIABLES) {
             const value = previous.get(key);
+
             if (value === undefined) delete process.env[key];
             else process.env[key] = value;
           }

@@ -48,27 +48,20 @@ const git = (repository: string, args: readonly string[]): CommandResult =>
 
 const requireGit = (repository: string, args: readonly string[], operation: string): void => {
   const command = git(repository, args);
+
   if (command.exitCode !== 0) {
     throw new Error(`${operation}: ${command.stderr.trim() || command.stdout.trim()}`);
   }
 };
 
-const makeProject = (): {
-  readonly root: string;
-  readonly main: string;
-  readonly merged: string;
-  readonly unmerged: string;
-  readonly dirty: string;
-  readonly open: string;
-  readonly missing: string;
-  readonly stray: string;
-} => {
+const makeProject = () => {
   const fixture = createGitFixture({
     prefix: "devenv-agents-gc-",
     branch: "feature/merged",
     worktreeName: "merged",
     env: undefined,
   });
+
   const { root, repository: main, worktree: merged } = fixture;
   const worktreeRoot = join(main, ".claude", "worktrees");
   const unmerged = join(worktreeRoot, "unmerged");
@@ -136,6 +129,7 @@ const makeProject = (): {
   rmSync(missing, { recursive: true, force: true });
 
   created.push(root);
+
   return { root, main, merged, unmerged, dirty, open, missing, stray };
 };
 
@@ -212,8 +206,11 @@ const gcBootstrap = (
       if (running.some((path) => samePath(path, worktreePath))) {
         return bootstrapInspection("running");
       }
+
       if (samePath(worktreePath, project.merged)) return bootstrapInspection("done");
+
       if (samePath(worktreePath, project.missing)) return bootstrapInspection("done");
+
       return bootstrapInspection("none");
     },
     forget: ({ worktreePath }) => forgotten.push(worktreePath),
@@ -267,6 +264,7 @@ describe("project gc", () => {
   it("classifies a live bootstrap as busy through inspect", () => {
     const project = makeProject();
     const runner = gcRunner(project);
+
     const report = runProjectGc({
       bootstrap: gcBootstrap(project, [], [project.merged]),
       buildDirectories: undefined,
@@ -289,6 +287,7 @@ describe("project gc", () => {
     const project = makeProject();
     const runner = gcRunner(project);
     const mergedPath = realpathSync(project.merged);
+
     const report = runProjectGc({
       bootstrap: gcBootstrap(project),
       buildDirectories: undefined,
@@ -323,6 +322,7 @@ describe("project gc", () => {
     const symlinkedMain = `${project.main}-alias`;
     symlinkSync(project.main, symlinkedMain);
     created.push(symlinkedMain);
+
     const runner = createRecordingRunner({
       git: runFixtureGit,
       "devenv update agents": result(0),
@@ -337,6 +337,7 @@ describe("project gc", () => {
       projectPath: symlinkedMain,
       runner,
     });
+
     const update = runProjectUpdate({ projectPath: symlinkedMain, runner });
     const missingPath = resolveMissing(project.missing);
 
@@ -390,11 +391,13 @@ describe("project gc", () => {
 
   it("keeps build directories when worktree removal fails", () => {
     const project = makeProject();
+
     const runner = createRecordingRunner({
       git: (invocation) => {
         if (invocation.args.includes("worktree") && invocation.args.includes("remove")) {
           return result(1, "", "removal blocked");
         }
+
         return runFixtureGit(invocation);
       },
     });
@@ -461,12 +464,15 @@ describe("adopt-worktrees", () => {
 
     const openedPaths: string[] = [];
     const bootstrapRuns: string[] = [];
+
     const bootstrap = createFakeWorktreeBootstrap({
       run: ({ worktreePath }) => {
         bootstrapRuns.push(worktreePath);
+
         return { exitCode: 0, state: "done", error: undefined };
       },
     });
+
     const herdrClient = createFakeHerdrClient({
       listWorktrees: () => [
         {
@@ -493,16 +499,19 @@ describe("adopt-worktrees", () => {
       ],
       openWorktree: ({ path }) => openedPaths.push(path),
     });
+
     const runner = createRecordingRunner({
       git: runFixtureGit,
       devenv: result(0),
     });
+
     const adopted = runAdoptWorktrees({
       bootstrap,
       herdrClient,
       projectPath: main,
       runner,
     });
+
     expect(adopted.exitCode).toBe(0);
     expect(adopted.items.map((item) => [item.path, item.opened, item.workspaceId])).toEqual([
       [realpathSync(first), true, undefined],
@@ -516,12 +525,14 @@ describe("adopt-worktrees", () => {
   it("continues adoption when opening a workspace throws", () => {
     const project = makeProject();
     const openedPaths: string[] = [];
+
     const herdrClient = gcClient(project, {
       openWorktree: ({ path }) => {
         openedPaths.push(path);
         throw new Error("workspace service unavailable");
       },
     });
+
     const runner = createRecordingRunner({
       git: runFixtureGit,
       devenv: result(0),
@@ -533,6 +544,7 @@ describe("adopt-worktrees", () => {
       projectPath: project.main,
       runner,
     });
+
     const existing = adopted.items.filter((item) => item.path !== resolveMissing(project.missing));
 
     expect(adopted.exitCode).toBe(1);
@@ -548,6 +560,7 @@ describe("adopt-worktrees", () => {
     const project = makeProject();
     const runner = gcRunner(project);
     const output = captureOutput();
+
     const dependencies = createCliDependencies({
       cwd: project.main,
       runner,
@@ -563,6 +576,7 @@ describe("adopt-worktrees", () => {
 
   it("runs both --all commands for every registered Darwin project", () => {
     const projects = [makeProject(), makeProject()];
+
     const registrations = projects.map((project, index) => ({
       repo: `forge/example/project-${index}`,
       path: project.main,
@@ -573,16 +587,19 @@ describe("adopt-worktrees", () => {
     const listedCwds: string[] = [];
     const closedWorkspaces: string[] = [];
     const openedCwds: string[] = [];
+
     const herdrClient = createFakeHerdrClient({
       listWorktrees: (options) => {
         listedCwds.push(options?.cwd ?? "");
         const project = projects[herdrListIndex % projects.length]!;
         herdrListIndex += 1;
+
         return herdrWorktrees(project);
       },
       closeWorkspace: (workspaceId, cwd) => closedWorkspaces.push(`${cwd ?? ""}:${workspaceId}`),
       openWorktree: ({ cwd }) => openedCwds.push(cwd),
     });
+
     const projectPaths = projects.map((project) => ({
       main: realpathSync(project.main),
       merged: realpathSync(project.merged),
@@ -592,15 +609,19 @@ describe("adopt-worktrees", () => {
       missing: resolveMissing(project.missing),
       stray: realpathSync(project.stray),
     }));
+
     const firstMain = projectPaths[0]!.main;
+
     const runner = createRecordingRunner({
       git: (invocation) => {
         if (invocation.args.includes("merge-base") && invocation.args.includes(firstMain)) {
           return result(1);
         }
+
         return runFixtureGit(invocation);
       },
     });
+
     const dependencies = createCliDependencies({
       cwd: projects[0]?.main,
       enumerateProjects: () => registrations,

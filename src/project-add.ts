@@ -125,10 +125,13 @@ const LOCAL_FILES = [
 ] as const;
 
 const DEFAULT_HOST = "strix";
+
 const DEFAULT_TEMPLATE_ROOT = resolve(import.meta.dir, "..", "templates");
+
 const SESSION_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 
 const isProjectTemplate = (value: string): value is ProjectTemplate =>
+  // SAFETY: The asserted value is constrained by the surrounding validation or fixture.
   PROJECT_TEMPLATES.includes(value as ProjectTemplate);
 
 const isDirectory = (path: string): boolean => {
@@ -151,6 +154,7 @@ const templateHint = (): string =>
  */
 const parseProjectRepository = (value: string): ProjectRepository => {
   const parts = value.trim().split("/");
+
   if (
     parts.length !== 3 ||
     parts.some((part) => part.length === 0 || part === "." || part === "..") ||
@@ -158,11 +162,16 @@ const parseProjectRepository = (value: string): ProjectRepository => {
   ) {
     throw new Error(`Repository must be <forge>/<org>/<repo>: ${value}`);
   }
+
+  // SAFETY: The asserted value is constrained by the surrounding validation or fixture.
   const [forge, organization, name] = parts as [string, string, string];
+
   if (!/^[A-Za-z0-9._-]+$/u.test(name)) {
     throw new Error(`Repository name is not safe for a Herdr session: ${name}`);
   }
+
   const repo = parts.join("/");
+
   return {
     repo,
     forge,
@@ -187,11 +196,13 @@ const projectRegistration = (
 
 const projectSession = (repository: ProjectRepository, declaration: ProjectDeclaration): string => {
   const session = declaration.session ?? repository.name;
+
   if (!SESSION_NAME_PATTERN.test(session)) {
     throw new Error(
       `Project session '${session}' is not safe for Herdr; use letters, numbers, '.', '_' or '-'`,
     );
   }
+
   return session;
 };
 
@@ -201,14 +212,17 @@ const templatePath = (templateRoot: string, template: string): string => {
   }
 
   const directory = resolve(templateRoot, template);
+
   if (!isDirectory(directory)) {
     throw new Error(`Devenv template '${template}' is missing at ${directory}. ${templateHint()}`);
   }
+
   for (const file of ["devenv.nix", "devenv.yaml"] as const) {
     if (!existsSync(join(directory, file))) {
       throw new Error(`Devenv template '${template}' is missing ${file}. ${templateHint()}`);
     }
   }
+
   return directory;
 };
 
@@ -221,6 +235,7 @@ const ensureCheckout = (
   if (existsSync(checkoutPath)) {
     if (!isDirectory(checkoutPath))
       throw new Error(`Checkout path is not a directory: ${checkoutPath}`);
+
     return false;
   }
 
@@ -236,19 +251,23 @@ const ensureCheckout = (
   // this directory itself; making the postcondition explicit keeps subsequent
   // local-file steps deterministic for either adapter.
   mkdirSync(checkoutPath, { recursive: true });
+
   return true;
 };
 
 const gitDirectory = (projectPath: string): string => {
   const dotGit = join(projectPath, ".git");
+
   try {
     if (lstatSync(dotGit).isDirectory()) return dotGit;
     const marker = readFileSync(dotGit, "utf8").trim();
     const target = marker.match(/^gitdir:\s*(.+)$/u)?.[1];
+
     if (target !== undefined) return resolve(projectPath, target);
   } catch {
     // The clone adapter may be a recording fixture without a .git directory.
   }
+
   return dotGit;
 };
 
@@ -261,11 +280,13 @@ const writeInfoExcludes = (projectPath: string): void => {
   const current = existsSync(path) ? readFileSync(path, "utf8") : "";
   const lines = new Set(current.split(/\r?\n/u).filter((line) => line.length > 0));
   let changed = false;
+
   for (const file of LOCAL_FILES) {
     if (lines.has(file)) continue;
     lines.add(file);
     changed = true;
   }
+
   if (!changed) return;
   const prefix = current.length === 0 || current.endsWith("\n") ? current : `${current}\n`;
   const additions = LOCAL_FILES.filter((file) => !current.split(/\r?\n/u).includes(file));
@@ -274,36 +295,49 @@ const writeInfoExcludes = (projectPath: string): void => {
 
 const ensureLocalLayer = (projectPath: string): void => {
   const path = join(projectPath, "devenv.local.nix");
+
   if (!existsSync(path)) writeFileSync(path, "{ ... }: {}\n");
 };
+
+const isString = (value: unknown): value is string => value === String(value);
 
 const projectsFileRecords = (projectsFile: string): ProjectRegistration[] => {
   if (!existsSync(projectsFile)) return [];
   let parsed: unknown;
+
   try {
+    // SAFETY: The asserted value is constrained by the surrounding validation or fixture.
     parsed = Bun.TOML.parse(readFileSync(projectsFile, "utf8")) as unknown;
   } catch (error) {
     throw new Error(`Unable to parse projects file ${projectsFile}: ${errorMessage(error)}`, {
       cause: error,
     });
   }
-  if (typeof parsed !== "object" || parsed === null) {
+
+  if (parsed === null || parsed !== Object(parsed)) {
     throw new Error(`Projects file ${projectsFile} must contain a TOML table`);
   }
+
+  // SAFETY: The asserted value is constrained by the surrounding validation or fixture.
   const values = (parsed as { projects?: unknown }).projects;
+
   if (values === undefined) return [];
+
   if (!Array.isArray(values))
     throw new Error(`Projects file ${projectsFile} projects must be an array`);
 
   return values.flatMap((value) => {
-    if (typeof value !== "object" || value === null) return [];
+    if (value === null || value !== Object(value)) return [];
+    // SAFETY: The asserted value is constrained by the surrounding validation or fixture.
     const record = value as { repo?: unknown; path?: unknown; session?: unknown };
-    if (typeof record.repo !== "string" || typeof record.path !== "string") return [];
+
+    if (!isString(record.repo) || !isString(record.path)) return [];
+
     return [
       {
         repo: record.repo,
         path: resolve(record.path),
-        session: typeof record.session === "string" ? record.session : basename(record.path),
+        session: isString(record.session) ? record.session : basename(record.path),
       },
     ];
   });
@@ -339,11 +373,14 @@ export const writeProjectsFile = (options: ProjectFileOptions): void => {
   const directory = dirname(options.projectsFile);
   mkdirSync(directory, { recursive: true });
   const existing = projectsFileRecords(options.projectsFile);
+
   const projects = existing.filter(
     (project) => project.repo !== options.project.repo && project.path !== options.project.path,
   );
+
   projects.push(options.project);
   const temporaryPath = `${options.projectsFile}.tmp-${randomUUID()}`;
+
   try {
     writeFileSync(temporaryPath, projectFileText(projects));
     renameSync(temporaryPath, options.projectsFile);
@@ -353,6 +390,7 @@ export const writeProjectsFile = (options: ProjectFileOptions): void => {
     } catch {
       // Preserve the original write or rename error.
     }
+
     throw error;
   }
 };
@@ -377,23 +415,29 @@ export const writeProjectDropIn = (options: ProjectDropInOptions): string => {
     path,
     `[Service]\nWorkingDirectory=${options.project.path}\n# ProjectRepository=${options.project.repo}\n`,
   );
+
   return path;
 };
 
 const systemdProjects = (systemdUserDirectory: string): ProjectRegistration[] => {
   if (!existsSync(systemdUserDirectory)) return [];
+
   return readdirSync(systemdUserDirectory, { withFileTypes: true })
     .flatMap((entry) => {
       if (!entry.isDirectory()) return [];
       const match = /^herdr@(.+)\.service\.d$/u.exec(entry.name);
+
       if (match === null) return [];
       const path = join(systemdUserDirectory, entry.name, "project.conf");
+
       if (!existsSync(path)) return [];
       const contents = readFileSync(path, "utf8");
       const workingDirectory = contents.match(/^WorkingDirectory=(.+)$/mu)?.[1];
+
       if (workingDirectory === undefined || workingDirectory.length === 0) return [];
       const session = match[1] ?? "";
       const repo = contents.match(/^# ProjectRepository=(.+)$/mu)?.[1] ?? session;
+
       return [{ repo, path: resolve(workingDirectory), session }];
     })
     .toSorted((left, right) => left.repo.localeCompare(right.repo));
@@ -413,6 +457,7 @@ export const enumerateProjects = (
       options.projectsFile ?? join(options.homeDirectory, ".config", "project", "projects.toml"),
     ).toSorted((left, right) => left.repo.localeCompare(right.repo));
   }
+
   return systemdProjects(
     options.systemdUserDirectory ?? join(options.homeDirectory, ".config", "systemd", "user"),
   );
@@ -447,23 +492,25 @@ const projectAttachInstructions = (
 const projectTemplate = (from: string | undefined, templateRoot: string): string | undefined => {
   if (from === undefined) return undefined;
   const directory = templatePath(templateRoot, from);
+
   return `path:${directory}`;
 };
 
-const registerProject = (
-  project: ProjectRegistration,
-  options: ProjectAddOptions,
-): { readonly unitDropIn: string | undefined; readonly projectsFile: string | undefined } => {
+const registerProject = (project: ProjectRegistration, options: ProjectAddOptions) => {
   const useProjectsFile = options.local || options.platform === "darwin";
+
   if (useProjectsFile) {
     const projectsFile =
       options.projectsFile ?? join(options.homeDirectory, ".config", "project", "projects.toml");
+
     writeProjectsFile({ project, projectsFile });
+
     return { unitDropIn: undefined, projectsFile };
   }
 
   const systemdUserDirectory =
     options.systemdUserDirectory ?? join(options.homeDirectory, ".config", "systemd", "user");
+
   const unitDropIn = writeProjectDropIn({ project, systemdUserDirectory });
   runRequiredCommand(
     options.runner,
@@ -479,6 +526,7 @@ const registerProject = (
     ["--user", "enable", "--now", `herdr@${project.session}`],
     { cwd: project.path, env: undefined },
   );
+
   return { unitDropIn, projectsFile: undefined };
 };
 
@@ -497,9 +545,11 @@ export const runProjectAdd = (options: ProjectAddOptions): ProjectAddResult => {
   assertProjectPluginEnabled(options.herdrClient);
   const repository = parseProjectRepository(options.repository);
   const template = projectTemplate(options.from, options.templateRoot);
+
   const codeRoot = resolve(
     options.codeRoot ?? projectCodeRoot(options.platform, options.homeDirectory),
   );
+
   const checkoutPath = join(codeRoot, repository.forge, repository.organization, repository.name);
   const checkoutCreated = ensureCheckout(repository, checkoutPath, codeRoot, options.runner);
 
@@ -523,6 +573,7 @@ export const runProjectAdd = (options: ProjectAddOptions): ProjectAddResult => {
 
   const registration = projectRegistration(repository, checkoutPath, session);
   const { unitDropIn, projectsFile } = registerProject(registration, options);
+
   return {
     registration,
     checkoutCreated,
@@ -538,7 +589,7 @@ export const runProjectAdd = (options: ProjectAddOptions): ProjectAddResult => {
  *
  * @returns Stable host paths for the current user's home directory.
  */
-export const defaultProjectRoots = (): {
-  readonly homeDirectory: string;
-  readonly templateRoot: string;
-} => ({ homeDirectory: homedir(), templateRoot: DEFAULT_TEMPLATE_ROOT });
+export const defaultProjectRoots = () => ({
+  homeDirectory: homedir(),
+  templateRoot: DEFAULT_TEMPLATE_ROOT,
+});

@@ -165,6 +165,7 @@ const isDirectory = (path: string): boolean => {
 
 const isSameOrDescendant = (parent: string, candidate: string): boolean => {
   const child = relative(canonicalPath(parent), canonicalPath(candidate));
+
   return (
     child.length === 0 || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child))
   );
@@ -177,8 +178,11 @@ const currentBranch = (mainCheckout: string, runner: CommandRunner): string => {
     ["-C", mainCheckout, "symbolic-ref", "--short", "HEAD"],
     mainCheckout,
   );
+
   const branch = result.stdout.trim();
+
   if (branch.length === 0) throw new Error("main checkout is in a detached HEAD state");
+
   return branch;
 };
 
@@ -195,11 +199,14 @@ const validBuildDirectories = (
   names: readonly string[] | undefined,
 ): readonly string[] => {
   const configured = names ?? WORKTREE_BUILD_DIRECTORIES;
+
   return configured.map((name) => {
     const path = resolve(worktreePath, name);
+
     if (!isSameOrDescendant(worktreePath, path) || samePath(worktreePath, path)) {
       throw new Error(`Build directory must be below the worktree: ${name}`);
     }
+
     return path;
   });
 };
@@ -215,6 +222,7 @@ const collectUnregisteredDirectories = (
   gitWorktrees: readonly WorkspaceWorktree[],
 ): readonly UnregisteredWorktreeDirectory[] => {
   const root = getManagedWorktreeRoot(mainCheckout);
+
   if (!isDirectory(root)) return [];
   const livePaths = gitWorktrees.map((worktree) => worktree.path);
   const unregistered: UnregisteredWorktreeDirectory[] = [];
@@ -223,16 +231,20 @@ const collectUnregisteredDirectories = (
     for (const entry of readdirSync(parent, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const child = canonicalPath(join(parent, entry.name));
+
       if (livePaths.some((path) => samePath(path, child))) continue;
+
       if (livePaths.some((path) => isSameOrDescendant(child, path))) {
         visit(child);
         continue;
       }
+
       unregistered.push({ path: child });
     }
   };
 
   visit(root);
+
   return unregistered.toSorted((left, right) => left.path.localeCompare(right.path));
 };
 
@@ -254,14 +266,18 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
   const herdrWorktrees = listHerdrWorktrees(options.herdrClient, mainCheckout);
   const herdrByPath = worktreeByPath(herdrWorktrees);
   const bootstrapByPath = new Map<string, WorktreeBootstrapInspection>();
+
   const inspectBootstrap = (worktreePath: string): WorktreeBootstrapInspection => {
     const canonical = canonicalPath(worktreePath);
     const existing = bootstrapByPath.get(canonical);
+
     if (existing !== undefined) return existing;
     const inspection = options.bootstrap.inspect({ mainCheckout, worktreePath });
     bootstrapByPath.set(canonical, inspection);
+
     return inspection;
   };
+
   const removable: RemovableWorktree[] = [];
   const busy: BusyWorktree[] = [];
 
@@ -280,7 +296,9 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
       });
       continue;
     }
+
     if (herdr?.openWorkspaceId !== undefined && !exists) continue;
+
     if (!exists) {
       busy.push({
         path: worktree.path,
@@ -291,6 +309,7 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
       });
       continue;
     }
+
     if (herdr?.openWorkspaceId !== undefined) {
       busy.push({
         path: worktree.path,
@@ -301,6 +320,7 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
       });
       continue;
     }
+
     if (worktree.detached || worktree.branch === undefined) {
       busy.push({
         path: worktree.path,
@@ -318,6 +338,7 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
       ["-C", worktree.path, "status", "--porcelain"],
       worktree.path,
     );
+
     if (statusResult.stdout.trim().length > 0) {
       busy.push({
         path: worktree.path,
@@ -334,6 +355,7 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
       ["-C", mainCheckout, "merge-base", "--is-ancestor", worktree.branch, targetBranch],
       mainCheckout,
     );
+
     if (merged.exitCode !== 0) {
       busy.push({
         path: worktree.path,
@@ -361,6 +383,7 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
     )
     .map((worktree) => ({
       path: canonicalPath(worktree.path),
+      // SAFETY: The asserted value is constrained by the surrounding validation or fixture.
       workspaceId: worktree.openWorkspaceId as string,
     }))
     .filter(
@@ -370,17 +393,25 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
     .toSorted((left, right) => left.path.localeCompare(right.path));
 
   const knownWorktreePaths = new Map<string, string>();
+
   for (const worktree of [...gitWorktrees, ...herdrWorktrees]) {
     const canonical = canonicalPath(worktree.path);
     knownWorktreePaths.set(canonical, worktree.path);
   }
+
   const staleStatuses: StaleWorktreeStatus[] = [...knownWorktreePaths.entries()]
-    .filter(([canonical]) => !isDirectory(canonical))
-    .map(([canonical, path]) => ({
-      path: canonical,
-      bootstrap: bootstrapByPath.get(canonical) ?? inspectBootstrap(path),
-    }))
-    .filter((status) => status.bootstrap.state !== "none" && status.bootstrap.state !== "running")
+    .flatMap(([canonical, path]) => {
+      if (isDirectory(canonical)) return [];
+
+      const status = {
+        path: canonical,
+        bootstrap: bootstrapByPath.get(canonical) ?? inspectBootstrap(path),
+      };
+
+      return status.bootstrap.state === "none" || status.bootstrap.state === "running"
+        ? []
+        : [status];
+    })
     .toSorted((left, right) => left.path.localeCompare(right.path));
 
   return {
@@ -394,10 +425,10 @@ const planProjectGc = (options: Omit<ProjectGcOptions, "dryRun">): ProjectGcPlan
   };
 };
 
-const cleanupFailure = (action: string, path: string, error: unknown): ProjectGcFailure => ({
+const cleanupFailure = (action: string, path: string, cause: unknown): ProjectGcFailure => ({
   action,
   path,
-  error: errorMessage(error),
+  error: errorMessage(cause),
 });
 
 const applyProjectGc = (
@@ -443,6 +474,7 @@ const applyProjectGc = (
         failures.push(cleanupFailure("delete build directory", buildDirectory, error));
       }
     }
+
     if (worktree.bootstrap.state !== "none") {
       try {
         options.bootstrap.forget({
@@ -483,6 +515,7 @@ const applyProjectGc = (
  */
 export const runProjectGc = (options: ProjectGcOptions): ProjectGcResult => {
   const plan = planProjectGc(options);
+
   if (options.dryRun) {
     return {
       ...plan,
@@ -497,6 +530,7 @@ export const runProjectGc = (options: ProjectGcOptions): ProjectGcResult => {
   }
 
   const applied = applyProjectGc(plan, options);
+
   return {
     ...plan,
     dryRun: false,
@@ -518,6 +552,7 @@ const formatSection = (title: string, lines: readonly string[]): string =>
  */
 export const formatProjectGcRecords = (result: ProjectGcResult): readonly string[] => {
   const records: string[] = [`Project: ${result.mainCheckout}`, `Target: ${result.targetBranch}`];
+
   const section = (title: string, values: readonly string[]): void => {
     records.push(formatSection(title, values));
   };
@@ -556,10 +591,12 @@ export const formatProjectGcRecords = (result: ProjectGcResult): readonly string
     records.push(`Removed worktrees: ${result.removed.length}`);
     records.push(`Closed workspaces: ${result.closedWorkspaces.length}`);
     records.push(`Deleted stale statuses: ${result.deletedStatuses.length}`);
+
     for (const failure of result.failures) {
       records.push(`Failed to ${failure.action} ${failure.path}: ${failure.error}`);
     }
   }
+
   return records;
 };
 
@@ -577,11 +614,13 @@ const worktreeLabelFor = (worktree: WorkspaceWorktree): string =>
 
 const appendError = (current: string | undefined, next: string): string => {
   if (current === undefined) return next;
+
   return `${current}; ${next}`;
 };
 
 const errorSuffix = (error: string | undefined): string => {
   if (error === undefined) return "";
+
   return `: ${error}`;
 };
 
@@ -589,13 +628,14 @@ const openWorktree = (
   options: AdoptWorktreesOptions,
   mainCheckout: string,
   worktree: WorkspaceWorktree,
-): { readonly opened: boolean; readonly error: string | undefined } => {
+) => {
   try {
     options.herdrClient.openWorktree({
       cwd: mainCheckout,
       path: worktree.path,
       label: worktreeLabelFor(worktree),
     });
+
     return { opened: true, error: undefined };
   } catch (error) {
     return { opened: false, error: errorMessage(error) };
@@ -634,6 +674,7 @@ export const runAdoptWorktrees = (options: AdoptWorktreesOptions): AdoptWorktree
 
     let bootstrap: WorktreeBootstrapResult | undefined;
     let error: string | undefined;
+
     try {
       bootstrap = options.bootstrap.run({
         allowCompleted: true,
@@ -648,6 +689,7 @@ export const runAdoptWorktrees = (options: AdoptWorktreesOptions): AdoptWorktree
 
     const herdr = herdrByPath.get(canonicalPath(worktree.path));
     let opened = false;
+
     if (herdr?.openWorkspaceId === undefined) {
       const open = openWorktree(options, mainCheckout, worktree);
       opened = open.opened;
@@ -679,20 +721,25 @@ export const runAdoptWorktrees = (options: AdoptWorktreesOptions): AdoptWorktree
  */
 export const formatAdoptWorktreesRecords = (result: AdoptWorktreesResult): readonly string[] => {
   const records = [`Project: ${result.mainCheckout}`];
+
   if (result.items.length === 0) {
     records.push("No linked worktrees found.");
   } else {
     for (const item of result.items) {
       const bootstrapState = item.bootstrap?.state ?? "not-run";
+
       const workspace = item.opened
         ? "opened"
         : item.workspaceId === undefined
           ? "already absent"
           : `open (${item.workspaceId})`;
+
       records.push(`${item.path} (${bootstrapState}, ${workspace})${errorSuffix(item.error)}`);
     }
   }
+
   records.push(`Summary: ${result.items.length} worktrees, exit ${result.exitCode}`);
+
   return records;
 };
 

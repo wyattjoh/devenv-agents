@@ -66,6 +66,7 @@ describe("project declaration", () => {
         { repo: "wyattjoh/infra", grant: ["services"] },
       ],
     };
+
     expect(readProjectDeclaration(root)).toEqual(expected);
   });
 });

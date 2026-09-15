@@ -43,6 +43,7 @@ const runDevenv = (
 ): ProjectUpdateItem => {
   try {
     runRequiredCommand(runner, label, "devenv", args, { cwd: path, env: undefined });
+
     return { kind, path, success: true, error: undefined };
   } catch (error) {
     return { kind, path, success: false, error: errorMessage(error) };
@@ -63,6 +64,7 @@ const runWarmup = (
       devenvTemplate: undefined,
       missingDevenvError: undefined,
     });
+
     return { kind, path: worktreePath, success: true, error: undefined };
   } catch (error) {
     return { kind, path: worktreePath, success: false, error: errorMessage(error) };
@@ -93,6 +95,7 @@ export const runProjectUpdate = (options: ProjectUpdateOptions): ProjectUpdateRe
   items.push(runWarmup(options.runner, "main", mainCheckout, mainCheckout));
 
   let worktrees: readonly WorkspaceWorktree[];
+
   try {
     worktrees = listLinkedWorktrees(mainCheckout, options.runner);
   } catch (error) {
@@ -102,8 +105,10 @@ export const runProjectUpdate = (options: ProjectUpdateOptions): ProjectUpdateRe
       success: false,
       error: errorMessage(error),
     });
+
     return { mainCheckout, items, exitCode: 1 };
   }
+
   for (const worktree of worktrees) {
     items.push(runWarmup(options.runner, "worktree", mainCheckout, worktree.path));
   }
@@ -117,14 +122,19 @@ export const runProjectUpdate = (options: ProjectUpdateOptions): ProjectUpdateRe
 
 const itemLabel = (kind: ProjectUpdateKind): string => {
   if (kind === "agents-input") return "Agents input";
+
   if (kind === "main") return "Main checkout";
+
   if (kind === "worktree-list") return "Worktree list";
+
   return "Worktree";
 };
 
 const itemStatus = (item: ProjectUpdateItem): string => {
   if (item.success) return "succeeded";
+
   if (item.error === undefined) return "failed: unknown error";
+
   return `failed: ${item.error}`;
 };
 
@@ -138,9 +148,11 @@ export const formatProjectUpdateRecords = (result: ProjectUpdateResult): readonl
   const records = result.items.map(
     (item) => `${itemLabel(item.kind)} (${item.path}): ${itemStatus(item)}`,
   );
+
   const succeeded = result.items.filter((item) => item.success).length;
   const failed = result.items.length - succeeded;
   records.push(`Summary: ${succeeded} succeeded, ${failed} failed`);
+
   return records;
 };
 

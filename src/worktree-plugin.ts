@@ -71,32 +71,43 @@ export type PluginInstallResult = {
   readonly pluginPath: string;
 };
 
-type JsonRecord = Record<string, unknown>;
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
 
-type PluginManifest = {
-  readonly id: string;
-  readonly version: string;
-};
+type JsonRecord = { readonly [key: string]: JsonValue };
 
 const isRecord = (value: unknown): value is JsonRecord =>
-  typeof value === "object" && value !== null;
+  value !== null && !Array.isArray(value) && value === Object(value);
+
+const isString = (value: unknown): value is string => value === String(value);
 
 const readString = (record: JsonRecord, key: string): string | undefined => {
   const value = record[key];
-  return typeof value === "string" ? value : undefined;
+
+  return isString(value) ? value : undefined;
 };
 
 const readRecord = (record: JsonRecord, key: string): JsonRecord | undefined => {
   const value = record[key];
+
   return isRecord(value) ? value : undefined;
 };
 
 const parseEventPayload = (eventJson: string | undefined): JsonRecord | undefined => {
   if (eventJson === undefined || eventJson.trim().length === 0) return undefined;
+
   try {
+    // SAFETY: The event payload is validated as a record before fields are read.
     const parsed = JSON.parse(eventJson) as unknown;
+
     if (!isRecord(parsed)) return undefined;
     const data = readRecord(parsed, "data");
+
     return data ?? parsed;
   } catch {
     return undefined;
@@ -107,24 +118,28 @@ const pathFromEventPayload = (payload: JsonRecord | undefined): string | undefin
   const worktree = payload === undefined ? undefined : readRecord(payload, "worktree");
   const workspace = payload === undefined ? undefined : readRecord(payload, "workspace");
   const workspaceWorktree = workspace === undefined ? undefined : readRecord(workspace, "worktree");
+
   const candidates = [
     worktree === undefined ? undefined : readString(worktree, "path"),
     worktree === undefined ? undefined : readString(worktree, "checkout_path"),
     workspaceWorktree === undefined ? undefined : readString(workspaceWorktree, "path"),
     workspaceWorktree === undefined ? undefined : readString(workspaceWorktree, "checkout_path"),
   ];
+
   return candidates.find((candidate): candidate is string => candidate !== undefined);
 };
 
 const workspaceIdFromPayload = (payload: JsonRecord | undefined): string | undefined => {
   if (payload === undefined) return undefined;
   const workspace = readRecord(payload, "workspace");
+
   const candidates = [
     workspace === undefined ? undefined : readString(workspace, "workspace_id"),
     workspace === undefined ? undefined : readString(workspace, "id"),
     readString(payload, "workspace_id"),
     readString(payload, "workspaceId"),
   ];
+
   return candidates.find((candidate): candidate is string => candidate !== undefined);
 };
 
@@ -155,11 +170,14 @@ const pathFromWorkspace = (workspaceId: string, herdrClient: HerdrClient): strin
 const resolveEventWorktreePath = (options: WorktreeEventOptions): string | undefined => {
   const payload = parseEventPayload(options.eventJson);
   const direct = pathFromEventPayload(payload);
+
   if (direct !== undefined) return isDirectory(direct) ? canonicalPath(direct) : undefined;
 
   const workspaceId = workspaceIdFromPayload(payload) ?? options.workspaceId;
+
   if (workspaceId === undefined || workspaceId.length === 0) return undefined;
   const listedPath = pathFromWorkspace(workspaceId, options.herdrClient);
+
   return listedPath === undefined || !isDirectory(listedPath)
     ? undefined
     : canonicalPath(listedPath);
@@ -191,18 +209,22 @@ const skippedEvent = (
  */
 export const runWorktreeEvent = (options: WorktreeEventOptions): WorktreeEventResult => {
   const worktreePath = resolveEventWorktreePath(options);
+
   if (worktreePath === undefined) return skippedEvent(undefined, undefined);
 
   let mainCheckout: string;
+
   try {
     mainCheckout = resolveMainCheckout(worktreePath, options.runner);
   } catch {
     return skippedEvent(worktreePath, undefined);
   }
+
   if (!hasProjectDeclaration(mainCheckout)) return skippedEvent(worktreePath, mainCheckout);
 
   try {
     const request = options.bootstrap.request({ mainCheckout, worktreePath });
+
     return {
       exitCode: 0,
       worktreePath,
@@ -225,20 +247,22 @@ export const runWorktreeEvent = (options: WorktreeEventOptions): WorktreeEventRe
 
 const manifestRoot = (pluginPath: string): string => {
   const resolved = resolve(pluginPath);
+
   return existsSync(join(resolved, PROJECT_PLUGIN_MANIFEST)) ? resolved : dirname(resolved);
 };
 
-const readPluginManifest = (
-  pluginPath: string,
-): { readonly root: string; readonly manifest: PluginManifest } => {
+const readPluginManifest = (pluginPath: string) => {
   const root = manifestRoot(pluginPath);
   const manifestPath = join(root, PROJECT_PLUGIN_MANIFEST);
+
   if (!existsSync(manifestPath)) {
     throw new Error(`Herdr plugin manifest not found: ${manifestPath}`);
   }
 
   let parsed: unknown;
+
   try {
+    // SAFETY: The manifest is validated as a record with required fields below.
     parsed = Bun.TOML.parse(readFileSync(manifestPath, "utf8")) as unknown;
   } catch (error) {
     throw new Error(
@@ -248,20 +272,25 @@ const readPluginManifest = (
       },
     );
   }
+
   if (!isRecord(parsed)) throw new Error("Herdr plugin manifest must be a TOML table");
   const id = readString(parsed, "id");
   const version = readString(parsed, "version");
+
   if (id !== PROJECT_PLUGIN_ID) {
     throw new Error(`Herdr plugin manifest id must be ${PROJECT_PLUGIN_ID}`);
   }
+
   if (version === undefined || version.length === 0) {
     throw new Error("Herdr plugin manifest requires a version");
   }
+
   return { root: canonicalPath(root), manifest: { id, version } };
 };
 
 const assertEnabledProjectPlugin = (plugins: readonly HerdrPlugin[]): void => {
   const plugin = plugins.find((candidate) => candidate.pluginId === PROJECT_PLUGIN_ID);
+
   if (plugin?.enabled !== true) {
     throw new Error(
       `Herdr plugin ${PROJECT_PLUGIN_ID} is not linked and enabled; run 'project plugin install' first`,
@@ -282,12 +311,15 @@ export const assertProjectPluginEnabled = (herdrClient: HerdrClient): void => {
 
 const pluginRootPath = (plugin: HerdrPlugin): string | undefined => {
   const path = plugin.pluginRoot ?? plugin.manifestPath;
+
   if (path === undefined) return undefined;
+
   return basename(path) === PROJECT_PLUGIN_MANIFEST ? dirname(path) : path;
 };
 
 const pluginRootMatches = (plugin: HerdrPlugin, root: string): boolean => {
   const path = pluginRootPath(plugin);
+
   return path !== undefined && samePath(path, root);
 };
 
@@ -304,11 +336,14 @@ const pluginRootMatches = (plugin: HerdrPlugin, root: string): boolean => {
  */
 export const runPluginInstall = (options: PluginInstallOptions): PluginInstallResult => {
   const { root, manifest } = readPluginManifest(options.pluginPath);
+
   const existing = options.herdrClient
     .listPlugins()
     .find((plugin) => plugin.pluginId === manifest.id);
+
   if (existing === undefined) {
     options.herdrClient.linkPlugin(root);
+
     return { exitCode: 0, action: "linked", pluginPath: root };
   }
 
@@ -322,11 +357,13 @@ export const runPluginInstall = (options: PluginInstallOptions): PluginInstallRe
 
   if (pluginRootMatches(existing, root) && existing.version === manifest.version) {
     options.herdrClient.enablePlugin(manifest.id);
+
     return { exitCode: 0, action: "enabled", pluginPath: root };
   }
 
   options.herdrClient.unlinkPlugin(manifest.id);
   options.herdrClient.linkPlugin(root);
+
   return { exitCode: 0, action: "relinked", pluginPath: root };
 };
 
@@ -336,6 +373,7 @@ const pluginPathCandidates = (
 ): readonly string[] => {
   const configured =
     pluginPath ?? environment[PROJECT_PLUGIN_PATH_ENV] ?? environment.PROJECT_PLUGIN_PATH;
+
   if (configured !== undefined) return [configured];
 
   return [
@@ -356,6 +394,7 @@ export const resolvePluginPath = (
   environment: PluginEnvironment = process.env,
 ): string => {
   const candidates = pluginPathCandidates(pluginPath, environment);
+
   return (
     candidates.find((candidate) => existsSync(join(candidate, PROJECT_PLUGIN_MANIFEST))) ??
     candidates[0] ??

@@ -109,29 +109,38 @@ type CliDependencies = {
 };
 
 const BRANCH_PROMPT = "Branch name: ";
+
 const WORKTREE_BOOTSTRAP_TIMEOUT_MS = 5 * 60 * 1000;
+
 const defaultNow = (): string => new Date().toISOString();
 
 const worktreeBootstrapDeadline = (now: () => string): number => {
   const current = Date.parse(now());
+
   if (Number.isNaN(current)) throw new Error("Invalid bootstrap clock value");
+
   return current + WORKTREE_BOOTSTRAP_TIMEOUT_MS;
 };
 
 const interactiveLine = (message = "Press Enter to retry or q to quit: "): string => {
-  const promptFunction = (
-    globalThis as typeof globalThis & {
-      prompt?: (message?: string) => string | null;
-    }
-  ).prompt;
+  const promptFunction =
+    // SAFETY: The asserted value is constrained by the surrounding validation or fixture.
+    (
+      globalThis as typeof globalThis & {
+        prompt?: (message?: string) => string | null;
+      }
+    ).prompt;
+
   return promptFunction?.(message) ?? (message === BRANCH_PROMPT ? "" : "q");
 };
 
 const platformFrom = (platform: string | undefined): ProjectPlatform => {
   if (platform === "linux" || platform === "darwin") return platform;
+
   if (platform !== undefined) {
     throw new Error(`PROJECT_PLATFORM must be either linux or darwin, got '${platform}'`);
   }
+
   if (process.platform === "darwin" || process.platform === "linux") return process.platform;
   throw new Error(`Unsupported host platform '${process.platform}'`);
 };
@@ -150,6 +159,7 @@ const resolveHostConfiguration = (
   environment: PluginEnvironment = process.env,
 ): HostConfiguration => {
   const roots = defaultProjectRoots();
+
   return {
     platform: platformFrom(environment.PROJECT_PLATFORM),
     homeDirectory: environment.PROJECT_HOME ?? environment.HOME ?? roots.homeDirectory,
@@ -173,6 +183,7 @@ const createDefaultDependencies = (
   const now = defaultNow;
   const herdrClient = createHerdrClient(runner, hostConfiguration.herdrBinPath);
   const syncReferences = createSyncReferences({ runner });
+
   return {
     cwd: undefined,
     now,
@@ -199,6 +210,7 @@ const isVersionFlag = (argument: string): boolean => argument === "--version" ||
 const printUnknown = (output: CliIO, argument: string): number => {
   output.stderr(`${PROJECT_NAME}: unknown argument '${argument}'\n`);
   output.stderr(`Run '${PROJECT_NAME} --help' for usage.\n`);
+
   return 1;
 };
 
@@ -296,7 +308,8 @@ const booleanFlagValue = (arguments_: ParsedCommandArguments, name: string): boo
 
 const stringFlagValue = (arguments_: ParsedCommandArguments, name: string): string | undefined => {
   const value = arguments_.flags[name];
-  return typeof value === "string" ? value : undefined;
+
+  return value === String(value) ? value : undefined;
 };
 
 const flagFor = (entry: CommandEntry, name: string): FlagSpec | undefined =>
@@ -311,23 +324,29 @@ const parseCommandArguments = (
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+
     if (argument === undefined) continue;
 
     if (argument.startsWith("--")) {
       const spec = flagFor(entry, argument);
+
       if (spec === undefined) throw new ArgumentParseError(`unknown flag '${argument}'`);
+
       if (flags[spec.name] !== undefined) {
         throw new ArgumentParseError(`flag '${argument}' may only be specified once`);
       }
+
       if (!spec.takesValue) {
         flags[spec.name] = true;
         continue;
       }
 
       const value = args[index + 1];
+
       if (value === undefined || value.startsWith("--")) {
         throw new ArgumentParseError(`flag '${argument}' requires a value`);
       }
+
       flags[spec.name] = value;
       index += 1;
       continue;
@@ -336,6 +355,7 @@ const parseCommandArguments = (
     if (positionals.length >= entry.positionals.length) {
       throw new ArgumentParseError(`unknown argument '${argument}'`);
     }
+
     positionals.push(argument);
   }
 
@@ -350,34 +370,43 @@ const parseCommandArguments = (
 
 const commandLabel = (entry: CommandMetadata): string => entry.tokens.join(" ");
 
-const commandErrorDetail = (entry: CommandMetadata | undefined, error: unknown): string => {
-  const message = errorMessage(error);
-  if (error !== undefined || entry === undefined) return message;
+const commandErrorDetail = (entry: CommandMetadata | undefined, cause: unknown): string => {
+  const message = errorMessage(cause);
+
+  if (cause !== undefined || entry === undefined) return message;
   const label = commandLabel(entry);
+
   if (label === "worktree-setup") return "setup failed";
+
   if (label === "wt create") return "worktree bootstrap failed";
+
   return message;
 };
 
-const formatCommandError = (entry: CommandMetadata | undefined, error: unknown): string => {
+const formatCommandError = (entry: CommandMetadata | undefined, cause: unknown): string => {
   const prefix = entry === undefined ? PROJECT_NAME : `${PROJECT_NAME} ${commandLabel(entry)}`;
-  return `${prefix}: ${commandErrorDetail(entry, error)}\n`;
+
+  return `${prefix}: ${commandErrorDetail(entry, cause)}\n`;
 };
 
-const printArgumentError = (output: CliIO, entry: CommandEntry, error: unknown): number => {
-  output.stderr(formatCommandError(entry, error));
+const printArgumentError = (output: CliIO, entry: CommandEntry, cause: unknown): number => {
+  output.stderr(formatCommandError(entry, cause));
   output.stderr(`Run '${PROJECT_NAME} --help' for usage.\n`);
+
   return 1;
 };
 
-const printCommandError = (output: CliIO, entry: CommandEntry, error: unknown): number => {
-  output.stderr(formatCommandError(entry, error));
+const printCommandError = (output: CliIO, entry: CommandEntry, cause: unknown): number => {
+  output.stderr(formatCommandError(entry, cause));
+
   return 1;
 };
 
 const requiredPositional = (context: CommandContext, index: number, name: string): string => {
   const value = context.arguments.positionals[index];
+
   if (value === undefined) throw new Error(`${name} is required`);
+
   return value;
 };
 
@@ -385,8 +414,10 @@ const runWorktreeSetupCommand = (
   context: CommandContext,
 ): CommandExecution<WorktreeBootstrapResult> => {
   const interactive = booleanFlagValue(context.arguments, "--interactive");
+
   const reportFailure = (result: WorktreeBootstrapResult): void => {
     context.output.stderr(formatCommandError(context.entry, result.error));
+
     if (interactive) context.output.stderr("Press Enter to retry or q to quit.\n");
   };
 
@@ -401,7 +432,9 @@ const runWorktreeSetupCommand = (
     mainCheckout: undefined,
     worktreePath: context.dependencies.cwd ?? process.cwd(),
   });
+
   if (result.exitCode !== 0 && !interactive) throw result.error;
+
   return commandExecution(result, result.exitCode);
 };
 
@@ -434,7 +467,9 @@ const runWorktreeNewCommand = (
   context: CommandContext,
 ): CommandExecution<WorktreeCreateResult | undefined> => {
   const branch = context.dependencies.readLine(BRANCH_PROMPT).trim();
+
   if (branch.length === 0) throw new Error("branch name is required");
+
   return worktreeCreateExecution(context, branch, true);
 };
 
@@ -445,6 +480,7 @@ const worktreeCreateOutput = (result: WorktreeCreateResult, json: boolean): stri
       root_pane_id: result.rootPaneId,
     })}\n`;
   }
+
   return `Workspace ID: ${result.workspaceId}\nRoot pane ID: ${result.rootPaneId}\n`;
 };
 
@@ -463,6 +499,7 @@ const runProjectUpdateCommand = (
     projectPath: context.projectPath,
     runner: context.dependencies.runner,
   });
+
   return commandExecution(result, result.exitCode);
 };
 
@@ -478,6 +515,7 @@ const runProjectGcCommand = (context: CommandContext): CommandExecution<ProjectG
     projectPath: context.projectPath,
     runner: context.dependencies.runner,
   });
+
   return commandExecution(result, result.exitCode);
 };
 
@@ -492,6 +530,7 @@ const runAdoptWorktreesCommand = (
     projectPath: context.projectPath,
     runner: context.dependencies.runner,
   });
+
   return commandExecution(result, result.exitCode);
 };
 
@@ -526,6 +565,7 @@ const runSyncCommand = (context: CommandContext): CommandExecution<void> => {
     syncReferences: context.dependencies.syncReferences,
     worktreePath: context.projectPath,
   });
+
   return commandExecution(undefined);
 };
 
@@ -539,6 +579,7 @@ const runWorktreeEventCommand = (
     herdrClient: context.dependencies.herdrClient,
     runner: context.dependencies.runner,
   });
+
   return commandExecution(result, result.exitCode);
 };
 
@@ -561,12 +602,12 @@ const formatWorktreeEvent = (_result: WorktreeEventResult): string => "";
 
 const failedCommandExecution = (
   entry: CommandMetadata,
-  error: unknown,
+  cause: unknown,
 ): FormattedCommandExecution => ({
   exitCode: 1,
   stdout: "",
   stdoutRecords: undefined,
-  stderr: formatCommandError(entry, error),
+  stderr: formatCommandError(entry, cause),
 });
 
 const formatCommandExecution = <Result>(
@@ -578,6 +619,7 @@ const formatCommandExecution = <Result>(
     const execution = definition.run(context);
     const stdout = definition.format(execution.result, context);
     const records = formatRecords?.(execution.result);
+
     return {
       exitCode: execution.exitCode,
       stdout,
@@ -603,6 +645,7 @@ const runAllProjects = <Result>(
   const stderr: string[] = [];
   let exitCode = 0;
   let projects: ReturnType<typeof enumerateProjects>;
+
   try {
     const enumerate = context.dependencies.enumerateProjects ?? enumerateProjects;
     projects = enumerate({
@@ -614,18 +657,22 @@ const runAllProjects = <Result>(
   } catch (error) {
     return failedCommandExecution(definition, error);
   }
+
   for (const project of projects) {
     const projectContext: CommandContext = {
       ...context,
       projectPath: project.path,
     };
+
     const execution = formatCommandExecution(definition, projectContext, formatRecords);
     stdout.push(
       prefixProjectOutput(project.repo, execution.stdoutRecords ?? outputRecords(execution.stdout)),
     );
     stderr.push(prefixProjectOutput(project.repo, outputRecords(execution.stderr)));
+
     if (execution.exitCode !== 0) exitCode = 1;
   }
+
   return { exitCode, stdout: stdout.join(""), stdoutRecords: undefined, stderr: stderr.join("") };
 };
 
@@ -792,12 +839,14 @@ const commandUsage = (entry: CommandEntry): string => {
   const positionals = entry.positionals.map((positional) =>
     positional.required ? `<${positional.usageName}>` : `[${positional.usageName}]`,
   );
+
   const flags =
     entry.flags.length === 0
       ? []
       : entry.flags.some((flag) => flag.takesValue)
         ? ["[options]"]
         : entry.flags.map((flag) => `[${flag.name}]`);
+
   return [...entry.tokens, ...positionals, ...flags].join(" ");
 };
 
@@ -821,6 +870,7 @@ type HelpLine = readonly [label: string, description: string];
  */
 const formatOptionLines = (lines: readonly HelpLine[]): string[] => {
   const descriptionColumn = Math.max(...lines.map(([label]) => label.length + 2));
+
   return lines.map(([label, description]) => formatHelpLine(label, description, descriptionColumn));
 };
 
@@ -832,9 +882,11 @@ const renderHelp = (entries: readonly CommandEntry[]): string => {
     "",
     "Commands:",
   ];
+
   for (const entry of entries) {
     const descriptionColumn = HELP_DESCRIPTION_COLUMNS[entry.helpLayout];
     lines.push(formatHelpLine(`  ${commandUsage(entry)}`, entry.description, descriptionColumn));
+
     if (entry.flags.some((flag) => flag.takesValue)) {
       for (const flag of entry.flags) {
         const value = flag.valueName === undefined ? "" : ` <${flag.valueName}>`;
@@ -844,6 +896,7 @@ const renderHelp = (entries: readonly CommandEntry[]): string => {
       }
     }
   }
+
   lines.push(
     "",
     "Options:",
@@ -852,6 +905,7 @@ const renderHelp = (entries: readonly CommandEntry[]): string => {
       ["  -v, --version", "Show the version"],
     ]),
   );
+
   return `${lines.join("\n")}\n`;
 };
 
@@ -862,11 +916,15 @@ const HELP_TEXT = renderHelp(commandTable);
 
 const commandEntryFor = (args: readonly string[]): CommandEntry | undefined => {
   let match: CommandEntry | undefined;
+
   for (const entry of commandTable) {
     if (args.length < entry.tokens.length) continue;
+
     if (!entry.tokens.every((token, index) => args[index] === token)) continue;
+
     if (match === undefined || entry.tokens.length > match.tokens.length) match = entry;
   }
+
   return match;
 };
 
@@ -886,28 +944,35 @@ export const runCli = (
   const output = io ?? processIO;
   const environment = dependencies?.environment ?? process.env;
   let hostConfiguration: HostConfiguration;
+
   try {
     hostConfiguration = resolveHostConfiguration(environment);
   } catch (error) {
     output.stderr(formatCommandError(undefined, error));
+
     return 1;
   }
+
   const pluginPath = resolvePluginPath(dependencies?.pluginPath, environment);
 
   if (args.length === 0 || args.some(isHelpFlag)) {
     output.stdout(HELP_TEXT);
+
     return 0;
   }
 
   if (args.length === 1 && isVersionFlag(args[0] ?? "")) {
     output.stdout(`${PROJECT_NAME} ${PROJECT_VERSION}\n`);
+
     return 0;
   }
 
   const entry = commandEntryFor(args);
+
   if (entry === undefined) return printUnknown(output, args[0] ?? "");
 
   let parsedArguments: ParsedCommandArguments;
+
   try {
     parsedArguments = parseCommandArguments(entry, args.slice(entry.tokens.length));
   } catch (error) {
@@ -916,6 +981,7 @@ export const runCli = (
 
   const resolvedDependencies =
     dependencies ?? createDefaultDependencies(hostConfiguration, environment, defaultCommandRunner);
+
   const context: CommandContext = {
     arguments: parsedArguments,
     dependencies: resolvedDependencies,
@@ -928,8 +994,11 @@ export const runCli = (
 
   try {
     const execution = entry.execute(context);
+
     if (execution.stdout.length > 0) output.stdout(execution.stdout);
+
     if (execution.stderr.length > 0) output.stderr(execution.stderr);
+
     return execution.exitCode;
   } catch (error) {
     return printCommandError(output, entry, error);

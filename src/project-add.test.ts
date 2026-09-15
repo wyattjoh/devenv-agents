@@ -28,10 +28,13 @@ import {
 } from "./testing/command-runner.ts";
 
 type ProjectAddOptions = Parameters<typeof runProjectAdd>[0];
+
 type ProjectRegistration = ReturnType<typeof enumerateProjects>[number];
 
 const created: string[] = [];
+
 const pluginRoot = fileURLToPath(new URL("../plugin", import.meta.url));
+
 const templateRoot = fileURLToPath(new URL("../templates", import.meta.url));
 
 const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
@@ -61,6 +64,7 @@ type Fixture = {
 
 const makeFixture = (): Fixture => {
   const root = mkdtempSync(join("/tmp", "devenv-agents-add-"));
+
   const fixture = {
     root,
     home: join(root, "home"),
@@ -68,8 +72,10 @@ const makeFixture = (): Fixture => {
     projects: join(root, "home", ".config", "project", "projects.toml"),
     systemd: join(root, "home", ".config", "systemd", "user"),
   };
+
   mkdirSync(fixture.code, { recursive: true });
   created.push(root);
+
   return fixture;
 };
 
@@ -121,11 +127,13 @@ describe("project add", () => {
     mkdirSync(join(checkout, ".agents"), { recursive: true });
     writeFileSync(join(checkout, ".agents", "project.toml"), 'session = "atlas"\n');
     writeFileSync(join(checkout, "devenv.nix"), "{ ... }: {}\n");
+
     const runner = createRecordingRunner({
       git: result(0),
       devenv: result(0),
       systemctl: result(0),
     });
+
     const syncRequests: string[] = [];
 
     const added = runProjectAdd(
@@ -177,6 +185,7 @@ describe("project add", () => {
     mkdirSync(join(checkout, ".agents"), { recursive: true });
     writeFileSync(join(checkout, ".agents", "project.toml"), 'session = "bad/session"\n');
     writeFileSync(join(checkout, "devenv.nix"), "{ ... }: {}\n");
+
     const runner = createRecordingRunner({
       devenv: result(0),
       systemctl: result(0),
@@ -188,6 +197,7 @@ describe("project add", () => {
 
   it("binds a bundled template for a bare repository", () => {
     const fixture = makeFixture();
+
     const runner = createRecordingRunner({
       git: result(0),
       devenv: result(0),
@@ -231,6 +241,7 @@ describe("project add", () => {
     writeFileSync(join(checkout, "devenv.nix"), "{ ... }: {}\n");
     const runner = createRecordingRunner({ devenv: result(0) });
     const output = captureOutput();
+
     const dependencies = createCliDependencies({
       runner,
       herdrClient: enabledHerdrClient(),
@@ -260,11 +271,14 @@ describe("project add", () => {
     const checkout = join(fixture.code, "github.com", "example", "widget");
     mkdirSync(checkout, { recursive: true });
     writeFileSync(join(checkout, "devenv.nix"), "{ ... }: {}\n");
+
     const runner = createRecordingRunner({
       devenv: result(0),
       systemctl: result(0),
     });
+
     const output = captureOutput();
+
     const dependencies = createCliDependencies({
       runner,
       herdrClient: enabledHerdrClient(),
@@ -288,6 +302,7 @@ describe("project add", () => {
     const fixture = makeFixture();
     const runner = createRecordingRunner();
     const output = captureOutput();
+
     const dependencies = createCliDependencies({
       runner,
       environment: { PROJECT_PLATFORM: "freebsd", PROJECT_HOME: fixture.home },
@@ -305,11 +320,13 @@ describe("project add", () => {
     writeFileSync(join(checkout, "devenv.nix"), "{ ... }: {}\n");
     const runner = createRecordingRunner({ devenv: result(0) });
     const addOptions = options(fixture, runner, { platform: "darwin", local: true });
+
     const preserved: ProjectRegistration = {
       repo: "github.com/example/other",
       path: join(fixture.code, "github.com", "example", "other"),
       session: "other",
     };
+
     writeProjectsFile({ project: preserved, projectsFile: fixture.projects });
 
     runProjectAdd(addOptions);
@@ -341,16 +358,19 @@ describe("project enumeration", () => {
 
   it("enumerates Linux projects from project drop-ins", () => {
     const fixture = makeFixture();
+
     const first: ProjectRegistration = {
       repo: "github.com/example/widget",
       path: join(fixture.code, "widget"),
       session: "widget",
     };
+
     const second: ProjectRegistration = {
       repo: "alpha",
       path: join(fixture.code, "alpha"),
       session: "alpha",
     };
+
     writeProjectDropIn({ project: first, systemdUserDirectory: fixture.systemd });
     writeProjectDropIn({ project: second, systemdUserDirectory: fixture.systemd });
 
@@ -366,11 +386,13 @@ describe("project enumeration", () => {
 
   it("enumerates Darwin projects from the deduplicated projects file", () => {
     const fixture = makeFixture();
+
     const project: ProjectRegistration = {
       repo: "github.com/example/widget",
       path: join(fixture.code, "github.com", "example", "widget"),
       session: "widget",
     };
+
     writeProjectsFile({ project, projectsFile: fixture.projects });
 
     expect(

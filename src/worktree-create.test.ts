@@ -25,18 +25,14 @@ const projectPlugin = (enabled: boolean): HerdrPlugin => ({
   version: "0.1.0",
 });
 
-const makeProject = (
-  branch: string,
-): {
-  readonly mainCheckout: string;
-  readonly worktreePath: string;
-} => {
+const makeProject = (branch: string) => {
   const root = mkdtempSync(join("/tmp", "devenv-agents-create-"));
   const mainCheckoutPath = join(root, "main");
   mkdirSync(mainCheckoutPath, { recursive: true });
   const mainCheckout = realpathSync(mainCheckoutPath);
   const worktreePath = join(mainCheckout, ".claude", "worktrees", branch);
   created.push(root);
+
   return { mainCheckout, worktreePath };
 };
 
@@ -73,24 +69,30 @@ describe("worktree creation", () => {
     const { mainCheckout, worktreePath } = makeProject(branch);
     const awaited: string[] = [];
     const deadlines: number[] = [];
+
     const herdrClient = createFakeHerdrClient({
       listPlugins: () => [projectPlugin(true)],
       createWorktree: () => {
         mkdirSync(worktreePath, { recursive: true });
+
         return { workspaceId: "w3", rootPaneId: "w3:p1" };
       },
     });
+
     const bootstrap = createFakeWorktreeBootstrap({
       await: ({ mainCheckout: awaitedMain, worktreePath: awaitedPath, deadline }) => {
-        if (typeof deadline !== "number") throw new Error("expected a numeric deadline");
+        if (deadline !== Number(deadline)) throw new Error("expected a numeric deadline");
         awaited.push(`${awaitedMain}:${awaitedPath}`);
-        deadlines.push(deadline);
+        deadlines.push(Number(deadline));
+
         return { state: "done", error: undefined };
       },
     });
+
     const runner = createRecordingRunner({
       [gitKey(mainCheckout)]: result(0, `${mainCheckout}/.git\n`),
     });
+
     const output = captureOutput();
 
     expect(
@@ -116,22 +118,27 @@ describe("worktree creation", () => {
   it("returns the recorded bootstrap error", () => {
     const branch = "feature/broken";
     const { mainCheckout, worktreePath } = makeProject(branch);
+
     const herdrClient = createFakeHerdrClient({
       listPlugins: () => [projectPlugin(true)],
       createWorktree: () => {
         mkdirSync(worktreePath, { recursive: true });
+
         return { workspaceId: "w3", rootPaneId: "w3:p1" };
       },
     });
+
     const bootstrap = createFakeWorktreeBootstrap({
       await: () => ({
         state: "failed",
         error: "devenv shell -- true failed with exit code 1: warm exploded",
       }),
     });
+
     const runner = createRecordingRunner({
       [gitKey(mainCheckout)]: result(0, `${mainCheckout}/.git\n`),
     });
+
     const output = captureOutput();
 
     expect(
@@ -148,16 +155,20 @@ describe("worktree creation", () => {
   it("uses the command-level fallback for an unreported bootstrap failure", () => {
     const branch = "feature/unreported-failure";
     const { mainCheckout } = makeProject(branch);
+
     const herdrClient = createFakeHerdrClient({
       listPlugins: () => [projectPlugin(true)],
       createWorktree: () => ({ workspaceId: "w3", rootPaneId: "w3:p1" }),
     });
+
     const bootstrap = createFakeWorktreeBootstrap({
       await: () => ({ state: "failed", error: undefined }),
     });
+
     const runner = createRecordingRunner({
       [gitKey(mainCheckout)]: result(0, `${mainCheckout}/.git\n`),
     });
+
     const output = captureOutput();
 
     expect(
@@ -174,19 +185,24 @@ describe("worktree creation", () => {
   it("reports a bootstrap timeout as a distinct non-zero outcome", () => {
     const branch = "feature/timeout";
     const { mainCheckout, worktreePath } = makeProject(branch);
+
     const herdrClient = createFakeHerdrClient({
       listPlugins: () => [projectPlugin(true)],
       createWorktree: () => {
         mkdirSync(worktreePath, { recursive: true });
+
         return { workspaceId: "w3", rootPaneId: "w3:p1" };
       },
     });
+
     const bootstrap = createFakeWorktreeBootstrap({
       await: () => ({ state: "timeout", error: undefined }),
     });
+
     const runner = createRecordingRunner({
       [gitKey(mainCheckout)]: result(0, `${mainCheckout}/.git\n`),
     });
+
     const output = captureOutput();
 
     expect(
@@ -204,16 +220,20 @@ describe("worktree creation", () => {
     const branch = "feature/from-prompt";
     const { mainCheckout, worktreePath } = makeProject(branch);
     const prompts: (string | undefined)[] = [];
+
     const herdrClient = createFakeHerdrClient({
       listPlugins: () => [projectPlugin(true)],
       createWorktree: () => {
         mkdirSync(worktreePath, { recursive: true });
+
         return { workspaceId: "w3", rootPaneId: "w3:p1" };
       },
     });
+
     const runner = createRecordingRunner({
       [gitKey(mainCheckout)]: result(0, `${mainCheckout}/.git\n`),
     });
+
     const output = captureOutput();
 
     expect(
@@ -226,6 +246,7 @@ describe("worktree creation", () => {
           herdrClient,
           readLine: (message) => {
             prompts.push(message);
+
             return branch;
           },
         }),

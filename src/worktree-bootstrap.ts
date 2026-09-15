@@ -260,10 +260,14 @@ type WorktreeStatusClaim = {
 };
 
 const defaultNow = (): string => new Date().toISOString();
+
 const worktreeStatusRoot = (mainCheckout: string): string =>
   join(canonicalPath(mainCheckout), ".devenv", "state", "project", "worktrees");
+
 const SETUP_HANDOFF = ".setup-handoff";
+
 const SETUP_OWNER = ".setup-owner";
+
 const SETUP_CANCELLED = ".setup-cancelled";
 
 const worktreeStatusHash = (canonicalWorktreePath: string): string =>
@@ -272,31 +276,41 @@ const worktreeStatusHash = (canonicalWorktreePath: string): string =>
 const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
   error instanceof Error && "code" in error;
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+type StatusValue = string | number | boolean | null | readonly StatusValue[] | StatusRecord;
 
-const readStatusString = (record: Record<string, unknown>, key: string): string | undefined => {
+type StatusRecord = { readonly [key: string]: StatusValue };
+
+const isRecord = (value: StatusValue | undefined): value is StatusRecord =>
+  value !== null && !Array.isArray(value) && value === Object(value);
+
+const readStatusString = (record: StatusRecord, key: string): string | undefined => {
   const value = record[key];
-  return typeof value === "string" ? value : undefined;
+
+  return value === String(value) ? value : undefined;
 };
 
-const parseStatus = (value: unknown): WorktreeStatus | undefined => {
+const parseStatus = (value: StatusValue | undefined): WorktreeStatus | undefined => {
   if (!isRecord(value)) return undefined;
   const path = readStatusString(value, "path");
   const state = readStatusString(value, "state");
   const startedAt = readStatusString(value, "started_at");
+
   if (path === undefined || startedAt === undefined) return undefined;
 
   if (state === "running") return { path, state, started_at: startedAt };
 
   const finishedAt = readStatusString(value, "finished_at");
+
   if (finishedAt === undefined) return undefined;
+
   if (state === "done") return { path, state, started_at: startedAt, finished_at: finishedAt };
 
   const error = readStatusString(value, "error");
+
   if (state === "failed" && error !== undefined) {
     return { path, state, error, started_at: startedAt, finished_at: finishedAt };
   }
+
   return undefined;
 };
 
@@ -314,6 +328,7 @@ const getWorktreeStatusPaths = (
   const canonicalWorktreePath = canonicalPath(worktreePath);
   const hash = worktreeStatusHash(canonicalWorktreePath);
   const directory = join(worktreeStatusRoot(canonicalMainCheckout), hash);
+
   return {
     mainCheckout: canonicalMainCheckout,
     worktreePath: canonicalWorktreePath,
@@ -326,8 +341,10 @@ const getWorktreeStatusPaths = (
 
 const readWorktreeStatus = (statusPath: string): WorktreeStatus | undefined => {
   if (!existsSync(statusPath)) return undefined;
+
   try {
-    return parseStatus(JSON.parse(readFileSync(statusPath, "utf8")) as unknown);
+    // SAFETY: The parser result is decoded by parseStatus before use.
+    return parseStatus(JSON.parse(readFileSync(statusPath, "utf8")) as StatusValue);
   } catch {
     return undefined;
   }
@@ -342,22 +359,27 @@ const createClaim = (paths: WorktreeStatusPaths, startedAt: string): WorktreeSta
   const handoffPath = join(paths.claimPath, SETUP_HANDOFF);
   let released = false;
   let handedOff = false;
+
   return {
     paths,
     startedAt,
     write: (state, error, finishedAt) => {
       const timestamp = finishedAt ?? (state === "running" ? undefined : defaultNow());
+
       if (state === "running") {
         writeJsonAtomically(paths.statusPath, {
           path: paths.worktreePath,
           state,
           started_at: startedAt,
         });
+
         return;
       }
+
       if (timestamp === undefined) {
         throw new Error(`Missing finished timestamp for ${state} worktree status`);
       }
+
       if (state === "done") {
         writeJsonAtomically(paths.statusPath, {
           path: paths.worktreePath,
@@ -365,11 +387,14 @@ const createClaim = (paths: WorktreeStatusPaths, startedAt: string): WorktreeSta
           started_at: startedAt,
           finished_at: timestamp,
         });
+
         return;
       }
+
       if (error === undefined || error.length === 0) {
         throw new Error("Missing error for failed worktree status");
       }
+
       writeJsonAtomically(paths.statusPath, {
         path: paths.worktreePath,
         state,
@@ -394,9 +419,12 @@ const createClaim = (paths: WorktreeStatusPaths, startedAt: string): WorktreeSta
         if (released) return false;
         released = true;
         rmSync(paths.claimPath, { recursive: true, force: true });
+
         return true;
       }
+
       handedOff = false;
+
       try {
         renameSync(handoffPath, join(paths.claimPath, SETUP_CANCELLED));
       } catch (error) {
@@ -404,7 +432,9 @@ const createClaim = (paths: WorktreeStatusPaths, startedAt: string): WorktreeSta
           return false;
         throw error;
       }
+
       rmSync(paths.claimPath, { recursive: true, force: true });
+
       return true;
     },
   };
@@ -413,6 +443,7 @@ const createClaim = (paths: WorktreeStatusPaths, startedAt: string): WorktreeSta
 const adoptSetupHandoff = (paths: WorktreeStatusPaths): WorktreeStatusClaim | undefined => {
   const handoffPath = join(paths.claimPath, SETUP_HANDOFF);
   const ownerPath = join(paths.claimPath, SETUP_OWNER);
+
   try {
     renameSync(handoffPath, ownerPath);
   } catch (error) {
@@ -422,10 +453,13 @@ const adoptSetupHandoff = (paths: WorktreeStatusPaths): WorktreeStatusClaim | un
   }
 
   const status = readWorktreeStatus(paths.statusPath);
+
   if (status?.state !== "running") {
     rmSync(paths.claimPath, { recursive: true, force: true });
+
     return undefined;
   }
+
   return createClaim(paths, status.started_at);
 };
 
@@ -433,7 +467,9 @@ const recoverStaleOwnerClaim = (paths: WorktreeStatusPaths): boolean => {
   if (existsSync(paths.statusPath) || !existsSync(join(paths.claimPath, SETUP_OWNER))) {
     return false;
   }
+
   rmSync(paths.claimPath, { recursive: true, force: true });
+
   return true;
 };
 
@@ -446,26 +482,35 @@ const claimWorktreeStatus = (
 ): WorktreeStatusClaim | undefined => {
   const paths = getWorktreeStatusPaths(mainCheckout, worktreePath);
   const current = readWorktreeStatus(paths.statusPath);
+
   if (current?.state === "done" && allowCompleted !== true) return undefined;
 
   mkdirSync(dirname(paths.statusPath), { recursive: true });
+
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       mkdirSync(paths.claimPath);
       const afterClaim = readWorktreeStatus(paths.statusPath);
+
       if (afterClaim?.state === "done" && allowCompleted !== true) {
         rmSync(paths.claimPath, { recursive: true, force: true });
+
         return undefined;
       }
+
       return createClaim(paths, (now ?? defaultNow)());
     } catch (error) {
       if (isNodeError(error) && error.code === "EEXIST") {
         if (adoptHandoff !== true) return undefined;
         const adopted = adoptSetupHandoff(paths);
+
         if (adopted !== undefined) return adopted;
+
         if (recoverStaleOwnerClaim(paths)) continue;
+
         return undefined;
       }
+
       rmSync(paths.claimPath, { recursive: true, force: true });
       throw error;
     }
@@ -486,28 +531,35 @@ const linkLocalLayer = (mainCheckout: string, worktreePath: string): void => {
   if (samePath(mainCheckout, worktreePath)) return;
 
   const source = join(mainCheckout, "devenv.local.nix");
+
   if (!existsSync(source)) return;
 
   const destination = join(worktreePath, "devenv.local.nix");
   let destinationStats: ReturnType<typeof lstatSync> | undefined;
+
   try {
     destinationStats = lstatSync(destination);
   } catch (error) {
     if (!isNodeError(error) || error.code !== "ENOENT") throw error;
   }
+
   if (destinationStats !== undefined) {
     if (!destinationStats.isSymbolicLink()) {
       throw new Error(`Cannot link ${destination}: a regular file already exists`);
     }
+
     const target = resolvePath(dirname(destination), readlinkSync(destination));
+
     if (samePath(target, source)) return;
     unlinkSync(destination);
   }
+
   symlinkSync(source, destination);
 };
 
 const wakePaneForWorktree = (herdrClient: HerdrClient, worktreePath: string): void => {
   let panes: readonly HerdrPane[];
+
   try {
     panes = herdrClient.listPanes();
   } catch {
@@ -517,6 +569,7 @@ const wakePaneForWorktree = (herdrClient: HerdrClient, worktreePath: string): vo
   const pane = panes.find(
     (candidate) => candidate.cwd !== undefined && samePath(candidate.cwd, worktreePath),
   );
+
   if (pane === undefined) return;
 
   try {
@@ -530,6 +583,7 @@ const inspectionFromStatus = (status: WorktreeStatus | undefined): WorktreeBoots
   if (status === undefined) {
     return { state: "none", error: undefined, startedAt: undefined, finishedAt: undefined };
   }
+
   if (status.state === "running") {
     return {
       state: "running",
@@ -538,6 +592,7 @@ const inspectionFromStatus = (status: WorktreeStatus | undefined): WorktreeBoots
       finishedAt: undefined,
     };
   }
+
   return {
     state: status.state,
     error: status.state === "failed" ? status.error : undefined,
@@ -549,6 +604,7 @@ const inspectionFromStatus = (status: WorktreeStatus | undefined): WorktreeBoots
 const currentInspection = (options: WorktreeBootstrapTarget): WorktreeBootstrapInspection => {
   const paths = getWorktreeStatusPaths(options.mainCheckout, options.worktreePath);
   const status = readWorktreeStatus(paths.statusPath);
+
   if (existsSync(paths.claimPath)) {
     return {
       state: "running",
@@ -557,14 +613,17 @@ const currentInspection = (options: WorktreeBootstrapTarget): WorktreeBootstrapI
       finishedAt: undefined,
     };
   }
+
   return inspectionFromStatus(status);
 };
 
 const requestOnce = (options: WorktreeBootstrapRequestOptions): WorktreeBootstrapRequestResult => {
   const paths = getWorktreeStatusPaths(options.mainCheckout, options.worktreePath);
   const claim = claimWorktreeStatus(options.mainCheckout, options.worktreePath, options.now);
+
   if (claim === undefined) {
     const inspection = currentInspection(options);
+
     return {
       state: inspection.state,
       claimed: false,
@@ -582,15 +641,18 @@ const requestOnce = (options: WorktreeBootstrapRequestOptions): WorktreeBootstra
       placement: "overlay",
       cwd: options.worktreePath,
     });
+
     return { state: "running", claimed: true, opened: true, error: undefined };
   } catch (error) {
     const message = errorMessage(error);
     let ownsClaim = false;
+
     try {
       ownsClaim = claim.cancelHandoff();
     } catch {
       // Request remains fail-open when claim cleanup itself fails.
     }
+
     if (ownsClaim) {
       try {
         claim.write("failed", message, (options.now ?? defaultNow)());
@@ -598,10 +660,12 @@ const requestOnce = (options: WorktreeBootstrapRequestOptions): WorktreeBootstra
         // Request remains fail-open when status persistence itself fails.
       }
     }
+
     const inspection = currentInspection({
       mainCheckout: paths.mainCheckout,
       worktreePath: paths.worktreePath,
     });
+
     return {
       state: inspection.state,
       claimed: true,
@@ -681,9 +745,11 @@ const resultForClaimFailure = (
   options: ResolvedWorktreeBootstrapRunOptions,
 ): WorktreeBootstrapResult => {
   const inspection = currentInspection(options);
+
   if (inspection.state === "done" && options.allowCompleted !== true) {
     return { exitCode: 0, state: "done", error: undefined };
   }
+
   return {
     exitCode: 1,
     state: inspection.state === "none" ? undefined : inspection.state,
@@ -700,6 +766,7 @@ const runOnce = (options: ResolvedWorktreeBootstrapRunOptions): WorktreeBootstra
     options.allowCompleted,
     true,
   );
+
   if (claim === undefined) return resultForClaimFailure(options);
 
   try {
@@ -720,14 +787,17 @@ const runOnce = (options: ResolvedWorktreeBootstrapRunOptions): WorktreeBootstra
     claim.write("done", undefined, (options.now ?? defaultNow)());
     claim.release();
     wakePaneForWorktree(options.herdrClient, options.worktreePath);
+
     return { exitCode: 0, state: "done", error: undefined };
   } catch (error) {
     const message = errorMessage(error);
+
     try {
       claim.write("failed", message, (options.now ?? defaultNow)());
     } finally {
       claim.release();
     }
+
     return { exitCode: 1, state: "failed", error: message };
   }
 };
@@ -747,26 +817,34 @@ const runOnce = (options: ResolvedWorktreeBootstrapRunOptions): WorktreeBootstra
 const runWorktreeBootstrap = (options: WorktreeBootstrapRunOptions): WorktreeBootstrapResult => {
   const resolved = resolveRunOptions(options);
   let result = runOnce(resolved);
+
   while (result.exitCode !== 0 && options.io !== undefined) {
     options.io.onFailure?.(result);
     const answer = options.io.readLine().trim().toLowerCase();
+
     if (answer === "q" || answer === "quit" || answer === "exit") return result;
     result = runOnce(resolved);
   }
+
   return result;
 };
 
 const deadlineMilliseconds = (deadline: WorktreeBootstrapDeadline): number => {
   if (deadline instanceof Date) return deadline.getTime();
-  if (typeof deadline === "number") return deadline;
-  const parsed = Date.parse(deadline);
+
+  if (deadline === Number(deadline)) return Number(deadline);
+  const parsed = Date.parse(String(deadline));
+
   if (Number.isNaN(parsed)) throw new Error(`Invalid bootstrap deadline: ${deadline}`);
+
   return parsed;
 };
 
 const clockMilliseconds = (now: (() => string) | undefined): number => {
   const parsed = Date.parse((now ?? defaultNow)());
+
   if (Number.isNaN(parsed)) throw new Error("Invalid bootstrap clock value");
+
   return parsed;
 };
 
@@ -780,14 +858,18 @@ const awaitWorktreeBootstrap = (
   options: WorktreeBootstrapAwaitOptions,
 ): WorktreeBootstrapAwaitResult => {
   const deadline = deadlineMilliseconds(options.deadline);
+
   for (;;) {
     const inspection = currentInspection(options);
+
     if (inspection.state === "done" || inspection.state === "failed") {
       return { state: inspection.state, error: inspection.error };
     }
+
     if (clockMilliseconds(options.now) >= deadline) {
       return { state: "timeout", error: undefined };
     }
+
     (options.sleep ?? defaultSleep)();
   }
 };

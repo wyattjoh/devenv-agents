@@ -32,6 +32,7 @@ const runGitOrThrow = (
   operation: string,
 ): void => {
   const result = spawnGit(args, options);
+
   if (result.exitCode === 0) return;
   throw new Error(
     `${operation} failed with exit code ${result.exitCode}: ${result.stderr.trim() || result.stdout.trim()}`,
@@ -78,6 +79,7 @@ export const createGitFixture = (
   }
 
   let cleaned = false;
+
   return {
     root,
     repository,
@@ -103,6 +105,7 @@ export const withGitFixture = <T>(
   options: GitFixtureOptions | undefined = undefined,
 ): T => {
   const fixture = createGitFixture(options);
+
   try {
     return callback(fixture);
   } finally {

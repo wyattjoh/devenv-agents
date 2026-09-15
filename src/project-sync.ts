@@ -115,13 +115,22 @@ class MissingReferencedCheckoutsError extends Error {
     const details = missingReferences
       .map(({ repo, path }) => `- ${repo} (expected at ${path})`)
       .join("\n");
+
     super(`Missing referenced checkouts:\n${details}`);
     this.name = "MissingReferencedCheckoutsError";
     this.missingReferences = [...missingReferences];
   }
 }
 
-type JsonRecord = Record<string, unknown>;
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
+
+type JsonRecord = { [key: string]: JsonValue };
 
 type ResolvedReference = {
   readonly repo: string;
@@ -130,16 +139,22 @@ type ResolvedReference = {
   readonly grant: ProjectDeclaration["references"][number]["grant"];
 };
 
-const isRecord = (value: unknown): value is JsonRecord =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+const isRecord = (value: JsonValue | undefined): value is JsonRecord =>
+  value !== null && !Array.isArray(value) && value === Object(value);
+
+const isString = (value: JsonValue | undefined): value is string => value === String(value);
+
+const isFiniteNumber = (value: JsonValue | undefined): value is number => Number.isFinite(value);
 
 const readString = (record: JsonRecord | undefined, key: string): string | undefined => {
   const value = record?.[key];
-  return typeof value === "string" ? value : undefined;
+
+  return isString(value) ? value : undefined;
 };
 
 const readRecord = (record: JsonRecord | undefined, key: string): JsonRecord | undefined => {
   const value = record?.[key];
+
   return isRecord(value) ? value : undefined;
 };
 
@@ -164,38 +179,51 @@ const normalizedRepoParts = (repo: string): readonly string[] => {
   ) {
     throw new Error(`Project reference repo must be a relative path: ${repo}`);
   }
+
   const parts = repo.split(/[\\/]/);
+
   if (parts.some((part) => part === "..")) {
     throw new Error(`Project reference repo must stay under the code root: ${repo}`);
   }
+
   const last = parts.at(-1);
+
   if (last === undefined || parts.some((part) => part.length === 0 || part === ".")) {
     throw new Error(`Project reference repo must use forge/org/repo: ${repo}`);
   }
+
   const normalizedLast = last.endsWith(".git") ? last.slice(0, -4) : last;
+
   if (normalizedLast.length === 0 || parts.length !== 3) {
     throw new Error(`Project reference repo must use forge/org/repo: ${repo}`);
   }
+
   return [...parts.slice(0, -1), normalizedLast];
 };
 
 const referenceName = (repo: string): string => {
   const last = normalizedRepoParts(repo).at(-1);
+
   if (last === undefined) throw new Error(`Project reference repo is invalid: ${repo}`);
   const name = last.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+
   if (name.length === 0) throw new Error(`Project reference repo has no usable name: ${repo}`);
+
   return name;
 };
 
 const environmentName = (value: string): string => {
   const name = value.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+
   if (name.length === 0) throw new Error(`Cannot derive an environment name from '${value}'`);
+
   return name.toUpperCase();
 };
 
 const machineCodeRoot = (options: ProjectSyncOptions): string => {
   if (options.codeRoot !== undefined) return resolve(options.codeRoot);
   const home = resolve(options.homeDirectory ?? homedir());
+
   return join(home, options.platform === "darwin" ? "Code" : "code");
 };
 
@@ -205,6 +233,7 @@ const resolveReference = (
 ): ResolvedReference => {
   const parts = normalizedRepoParts(reference.repo);
   const path = resolve(codeRoot, ...parts);
+
   return {
     repo: reference.repo,
     name: referenceName(reference.repo),
@@ -215,22 +244,29 @@ const resolveReference = (
 
 const mergeResolvedReferences = (references: readonly ResolvedReference[]): ResolvedReference[] => {
   const merged = new Map<string, ResolvedReference>();
+
   for (const reference of references) {
     const previous = merged.get(reference.path);
+
     if (previous === undefined) {
       merged.set(reference.path, reference);
       continue;
     }
+
+    // SAFETY: The asserted value is constrained by the surrounding validation or fixture.
     const grant = [
       ...new Set([...previous.grant, ...reference.grant]),
     ] as ResolvedReference["grant"];
+
     merged.set(reference.path, { ...previous, grant });
   }
+
   return [...merged.values()];
 };
 
 const isPathWithin = (root: string, candidate: string): boolean => {
   const relativePath = relative(root, candidate);
+
   return (
     relativePath.length > 0 &&
     relativePath !== ".." &&
@@ -242,14 +278,13 @@ const isPathWithin = (root: string, candidate: string): boolean => {
 const resolveReferences = (
   codeRoot: string,
   references: readonly ProjectDeclaration["references"][number][],
-): {
-  readonly available: readonly ResolvedReference[];
-  readonly missing: readonly ResolvedReference[];
-} => {
+) => {
   const resolved = mergeResolvedReferences(
     references.map((reference) => resolveReference(codeRoot, reference)),
   );
+
   let canonicalCodeRoot: string;
+
   try {
     canonicalCodeRoot = realpathSync(codeRoot);
   } catch {
@@ -258,19 +293,24 @@ const resolveReferences = (
 
   const available: ResolvedReference[] = [];
   const missing: ResolvedReference[] = [];
+
   for (const reference of resolved) {
     if (!isDirectory(reference.path)) {
       missing.push(reference);
       continue;
     }
+
     const canonicalPath = realpathSync(reference.path);
+
     if (!isPathWithin(canonicalCodeRoot, canonicalPath)) {
       throw new Error(
         `Project reference checkout '${reference.repo}' escapes the code root: ${reference.path} -> ${canonicalPath}`,
       );
     }
+
     available.push({ ...reference, path: canonicalPath });
   }
+
   return {
     available: mergeResolvedReferences(available),
     missing: mergeResolvedReferences(missing),
@@ -280,14 +320,17 @@ const resolveReferences = (
 const validateIdentityCollisions = (references: readonly ResolvedReference[]): void => {
   for (const grant of ["module", "services"] as const) {
     const identities = new Map<string, ResolvedReference>();
+
     for (const reference of references) {
       if (!reference.grant.includes(grant)) continue;
       const previous = identities.get(reference.name);
+
       if (previous !== undefined && previous.path !== reference.path) {
         throw new Error(
           `Project reference ${grant} identity collision: '${previous.repo}' and '${reference.repo}' both map to '${reference.name}'`,
         );
       }
+
       identities.set(reference.name, reference);
     }
   }
@@ -295,10 +338,13 @@ const validateIdentityCollisions = (references: readonly ResolvedReference[]): v
 
 const uniqueBy = <T>(values: readonly T[], key: (value: T) => string): T[] => {
   const seen = new Set<string>();
+
   return values.filter((value) => {
     const valueKey = key(value);
+
     if (seen.has(valueKey)) return false;
     seen.add(valueKey);
+
     return true;
   });
 };
@@ -306,20 +352,29 @@ const uniqueBy = <T>(values: readonly T[], key: (value: T) => string): T[] => {
 const readJsonObject = (path: string, label: string): JsonRecord => {
   if (!existsSync(path)) return {};
   let parsed: unknown;
+
   try {
+    // SAFETY: The parsed JSON is validated as an object before it is used.
     parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
   } catch (error) {
     throw new Error(`Unable to parse ${label} ${path}: ${errorMessage(error)}`, { cause: error });
   }
-  if (!isRecord(parsed)) throw new Error(`${label} must contain a JSON object: ${path}`);
-  return parsed;
+
+  // SAFETY: JSON.parse output is decoded as a JSON value before record use.
+  const value = parsed as JsonValue;
+
+  if (!isRecord(value)) throw new Error(`${label} must contain a JSON object: ${path}`);
+
+  return value;
 };
 
-const stringArray = (value: unknown, label: string): string[] => {
+const stringArray = (value: JsonValue | undefined, label: string): string[] => {
   if (value === undefined) return [];
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+
+  if (!Array.isArray(value) || value.some((entry) => !isString(entry))) {
     throw new Error(`${label} must be an array of strings`);
   }
+
   return [...value];
 };
 
@@ -327,12 +382,15 @@ const writeClaudeSettings = (worktreePath: string, directories: readonly string[
   const path = join(worktreePath, CLAUDE_LOCAL_SETTINGS_PATH);
   const settings = readJsonObject(path, "Claude local settings");
   const permissionsValue = settings.permissions;
+
   if (permissionsValue !== undefined && !isRecord(permissionsValue)) {
     throw new Error(`Claude local settings permissions must be an object: ${path}`);
   }
+
   const permissions = permissionsValue === undefined ? {} : permissionsValue;
   const existing = stringArray(permissions.additionalDirectories, "Claude additionalDirectories");
   const additionalDirectories = uniqueBy([...existing, ...directories], (directory) => directory);
+
   const updated = {
     ...settings,
     permissions: {
@@ -340,6 +398,7 @@ const writeClaudeSettings = (worktreePath: string, directories: readonly string[
       additionalDirectories,
     },
   };
+
   ensureParent(path);
   writeFileSync(path, `${JSON.stringify(updated, null, 2)}\n`, "utf8");
 };
@@ -347,15 +406,22 @@ const writeClaudeSettings = (worktreePath: string, directories: readonly string[
 const readYamlObject = (path: string): JsonRecord | undefined => {
   if (!existsSync(path)) return undefined;
   let parsed: unknown;
+
   try {
+    // SAFETY: The parsed YAML is validated as an object before it is used.
     parsed = Bun.YAML.parse(readFileSync(path, "utf8")) as unknown;
   } catch (error) {
     throw new Error(`Unable to parse devenv local YAML ${path}: ${errorMessage(error)}`, {
       cause: error,
     });
   }
-  if (!isRecord(parsed)) throw new Error(`devenv local YAML must contain an object: ${path}`);
-  return parsed;
+
+  // SAFETY: YAML parser output is decoded as a JSON-shaped value before record use.
+  const value = parsed as JsonValue;
+
+  if (!isRecord(value)) throw new Error(`devenv local YAML must contain an object: ${path}`);
+
+  return value;
 };
 
 const writeYamlObject = (path: string, value: JsonRecord): void => {
@@ -372,26 +438,33 @@ const reconcileDevenvOverlay = (
 ): void => {
   const path = join(worktreePath, DEVENV_LOCAL_YAML_PATH);
   const existing = readYamlObject(path);
+
   if (existing === undefined && references.length === 0) return;
 
   const updated: JsonRecord = existing === undefined ? {} : { ...existing };
   const existingInputs = existing?.inputs;
+
   if (existingInputs !== undefined && !isRecord(existingInputs)) {
     throw new Error(`devenv local YAML inputs must be an object: ${path}`);
   }
+
   const inputEntries = Object.entries(existingInputs ?? {}).filter(
     ([name]) => !managedReferenceName(name),
   );
+
   const managedInputsPreviouslyPresent = Object.keys(existingInputs ?? {}).some(
     managedReferenceName,
   );
+
   const inputs: JsonRecord = Object.fromEntries(inputEntries);
+
   for (const reference of references) {
     inputs[`ref-${reference.name}`] = {
       url: `path:${reference.path}`,
       flake: false,
     };
   }
+
   if (
     Object.keys(inputs).length > 0 ||
     (existingInputs !== undefined && !managedInputsPreviouslyPresent)
@@ -404,6 +477,7 @@ const reconcileDevenvOverlay = (
   const existingImports = existing?.imports;
   const imports = stringArray(existingImports, "devenv local YAML imports");
   const managedImportsPreviouslyPresent = imports.some(managedReferenceName);
+
   if (
     references.length === 0 &&
     !managedInputsPreviouslyPresent &&
@@ -411,6 +485,7 @@ const reconcileDevenvOverlay = (
   ) {
     return;
   }
+
   const reconciledImports = uniqueBy(
     [
       ...imports.filter((name) => !managedReferenceName(name)),
@@ -418,6 +493,7 @@ const reconcileDevenvOverlay = (
     ],
     (name) => name,
   );
+
   if (
     reconciledImports.length > 0 ||
     (existingImports !== undefined && !managedImportsPreviouslyPresent)
@@ -429,13 +505,16 @@ const reconcileDevenvOverlay = (
 
   if (Object.keys(updated).length === 0) {
     if (existing !== undefined) unlinkSync(path);
+
     return;
   }
+
   writeYamlObject(path, updated);
 };
 
 const shellScalar = (value: string): string => {
   if (/^[A-Za-z0-9_./:@%+-]+$/.test(value)) return value;
+
   return `'${value.replaceAll("'", "'\\''")}'`;
 };
 
@@ -452,24 +531,30 @@ const reconcileReferencesEnvironment = (
 ): void => {
   const path = join(projectRoot, REFERENCES_ENV_PATH);
   const existing = existsSync(path) ? readFileSync(path, "utf8") : undefined;
+
   const generated = endpoints.flatMap(({ name, service, endpoint }) => {
     const prefix = `REF_${environmentName(name)}_${environmentName(service)}`;
+
     return [
       `export ${prefix}_HOST=${shellScalar(endpoint.host)}`,
       `export ${prefix}_PORT=${endpoint.port}`,
     ];
   });
+
   if (existing === undefined && generated.length === 0) return;
 
   const existingLines = existing === undefined ? [] : existing.split(/\r?\n/);
   const preservedLines = existingLines.filter((line) => !managedEnvironmentLine(line));
   const hadManagedLines = preservedLines.length !== existingLines.length;
+
   while (preservedLines.at(-1) === "") preservedLines.pop();
 
   if (generated.length === 0 && preservedLines.length === 0) {
     if (hadManagedLines) unlinkSync(path);
+
     return;
   }
+
   if (!hadManagedLines && generated.length === 0) return;
 
   const lines = [
@@ -478,34 +563,45 @@ const reconcileReferencesEnvironment = (
     ...generated,
     "",
   ];
+
   ensureParent(path);
   writeFileSync(path, lines.join("\n"), "utf8");
 };
 
 const parseJsonOutput = (stdout: string): JsonRecord => {
   let parsed: unknown;
+
   try {
+    // SAFETY: The parsed JSON is validated as an object before it is used.
     parsed = JSON.parse(stdout) as unknown;
   } catch (error) {
     throw new Error(`devenv eval processes returned invalid JSON: ${errorMessage(error)}`, {
       cause: error,
     });
   }
-  if (!isRecord(parsed))
+
+  // SAFETY: JSON parser output is decoded as a JSON value before record use.
+  const value = parsed as JsonValue;
+
+  if (!isRecord(value))
     throw new Error("devenv eval processes returned a JSON value, not an object");
-  return parsed;
+
+  return value;
 };
 
-const portNumber = (value: unknown): number | undefined => {
+const portNumber = (value: JsonValue | undefined): number | undefined => {
   const candidate =
-    typeof value === "number" || typeof value === "string"
+    isFiniteNumber(value) || isString(value)
       ? value
       : isRecord(value)
         ? (value.value ?? value.port)
         : undefined;
-  const port = typeof candidate === "string" ? Number(candidate) : candidate;
-  if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535)
+
+  const port = isString(candidate) ? Number(candidate) : candidate;
+
+  if (!isFiniteNumber(port) || !Number.isInteger(port) || port < 1 || port > 65535)
     return undefined;
+
   return port;
 };
 
@@ -515,19 +611,25 @@ const stringFromKeys = (
 ): string | undefined => {
   for (const key of keys) {
     const value = readString(record, key);
+
     if (value !== undefined && value.length > 0) return value;
   }
+
   return undefined;
 };
 
 const serviceProcess = (output: JsonRecord, serviceName: string): JsonRecord | undefined => {
   const result = readRecord(output, "result");
+
   const processes =
     readRecord(output, "processes") ?? readRecord(result, "processes") ?? result ?? output;
+
   const process = readRecord(processes, serviceName);
   const services = readRecord(output, "services") ?? readRecord(result, "services");
   const service = readRecord(services, serviceName);
+
   if (process !== undefined && service !== undefined) return { ...service, ...process };
+
   return process ?? service;
 };
 
@@ -536,9 +638,11 @@ const endpointFromProcess = (
   serviceName: string,
 ): ServiceEndpoint | undefined => {
   const process = serviceProcess(output, serviceName);
+
   if (process === undefined) return undefined;
   const ports = readRecord(process, "ports");
   const mainPort = ports?.main;
+
   const port =
     portNumber(mainPort) ??
     (ports === undefined
@@ -548,7 +652,9 @@ const endpointFromProcess = (
           .find((candidate): candidate is number => candidate !== undefined)) ??
     portNumber(process.port) ??
     portNumber(process.value);
+
   if (port === undefined) return undefined;
+
   const host =
     stringFromKeys(mainPort && isRecord(mainPort) ? mainPort : undefined, [
       "host",
@@ -557,6 +663,7 @@ const endpointFromProcess = (
     ]) ??
     stringFromKeys(process, ["host", "hostname", "listen_address", "listenAddress", "address"]) ??
     DEFAULT_SERVICE_HOST;
+
   return { host, port };
 };
 
@@ -568,6 +675,7 @@ const evaluateProcessOutput = (projectRoot: string, runner: CommandRunner): Json
     ["eval", "processes"],
     { cwd: projectRoot, env: undefined },
   );
+
   return parseJsonOutput(result.stdout);
 };
 
@@ -577,6 +685,7 @@ const defaultServiceEndpointResolver = (
   serviceName: string,
 ): ServiceEndpoint => {
   const endpoint = endpointFromProcess(processOutput, serviceName);
+
   if (endpoint !== undefined) return endpoint;
   throw new Error(
     `Referenced service '${serviceName}' in ${projectRoot} has no allocated TCP port in devenv processes`,
@@ -588,13 +697,16 @@ const validatedEndpoint = (
   projectRoot: string,
   serviceName: string,
 ): ServiceEndpoint => {
-  if (typeof endpoint.host !== "string" || endpoint.host.length === 0) {
+  if (!isString(endpoint.host) || endpoint.host.length === 0) {
     throw new Error(`Referenced service '${serviceName}' in ${projectRoot} has no host`);
   }
+
   const port = portNumber(endpoint.port);
+
   if (port === undefined) {
     throw new Error(`Referenced service '${serviceName}' in ${projectRoot} has an invalid port`);
   }
+
   return { host: endpoint.host, port };
 };
 
@@ -608,6 +720,7 @@ const materializeServices = (
 }[] => {
   const runner = options.runner ?? defaultCommandRunner;
   const outputByProject = new Map<string, JsonRecord>();
+
   const endpoints: {
     readonly name: string;
     readonly service: string;
@@ -617,18 +730,23 @@ const materializeServices = (
   for (const reference of references) {
     if (!reference.grant.includes("services")) continue;
     const declaration = readProjectDeclaration(reference.path);
+
     for (const serviceName of declaration.scopedServices) {
       let endpoint: ServiceEndpoint;
+
       if (options.resolveServiceEndpoint !== undefined) {
         endpoint = options.resolveServiceEndpoint(reference.path, serviceName, runner);
       } else {
         let processOutput = outputByProject.get(reference.path);
+
         if (processOutput === undefined) {
           processOutput = evaluateProcessOutput(reference.path, runner);
           outputByProject.set(reference.path, processOutput);
         }
+
         endpoint = defaultServiceEndpointResolver(processOutput, reference.path, serviceName);
       }
+
       endpoints.push({
         name: reference.name,
         service: serviceName,
@@ -658,9 +776,11 @@ const syncProjectReferences = (
 ): ProjectSyncResult => {
   const options: ProjectSyncOptions = suppliedOptions;
   const references = request.declaration.references;
+
   if (references.length === 0) {
     reconcileDevenvOverlay(request.worktreePath, []);
     reconcileReferencesEnvironment(request.projectRoot, []);
+
     return {
       treeDirectories: [],
       moduleInputs: [],
@@ -670,10 +790,12 @@ const syncProjectReferences = (
   }
 
   const codeRoot = machineCodeRoot(options);
+
   const { available: availableReferences, missing: missingReferences } = resolveReferences(
     codeRoot,
     references,
   );
+
   validateIdentityCollisions([...availableReferences, ...missingReferences]);
 
   const treeDirectories = uniqueBy(
@@ -682,12 +804,14 @@ const syncProjectReferences = (
       .map((reference) => reference.path),
     (path) => path,
   );
+
   if (treeDirectories.length > 0) writeClaudeSettings(request.worktreePath, treeDirectories);
 
   const moduleReferences = uniqueBy(
     availableReferences.filter((reference) => reference.grant.includes("module")),
     (reference) => reference.path,
   );
+
   reconcileDevenvOverlay(request.worktreePath, moduleReferences);
 
   const serviceEndpoints = materializeServices(availableReferences, options);
@@ -699,7 +823,9 @@ const syncProjectReferences = (
     serviceEndpoints: serviceEndpoints.map(({ name, service }) => `${name}:${service}`),
     missingReferences: missingReferences.map(({ repo }) => repo),
   };
+
   if (missingReferences.length > 0) throw new MissingReferencedCheckoutsError(missingReferences);
+
   return result;
 };
 

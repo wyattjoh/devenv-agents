@@ -12,6 +12,7 @@ describe("Herdr client", () => {
     const runner = createRecordingRunner({
       herdr: { exitCode: 0, stdout: fixture("worktree-list.json"), stderr: "" },
     });
+
     const client = createHerdrClient(runner, undefined);
 
     expect(client.listWorktrees({ cwd: "/tmp/probe/repo", workspaceId: undefined })).toEqual([
@@ -44,6 +45,7 @@ describe("Herdr client", () => {
     const runner = createRecordingRunner({
       herdr: { exitCode: 0, stdout: fixture("worktree-list.json"), stderr: "" },
     });
+
     const client = createHerdrClient(runner, undefined);
 
     expect(client.resolveWorktree("w2")).toEqual({
@@ -78,6 +80,7 @@ describe("Herdr client", () => {
         stderr: "",
       },
     });
+
     const client = createHerdrClient(runner, undefined);
 
     expect(client.listPlugins()).toEqual([
@@ -103,6 +106,7 @@ describe("Herdr client", () => {
     const runner = createRecordingRunner({
       herdr: { exitCode: 0, stdout: fixture("pane-list.json"), stderr: "" },
     });
+
     const client = createHerdrClient(runner, undefined);
 
     expect(client.listPanes()).toEqual([
@@ -124,6 +128,7 @@ describe("Herdr client", () => {
     const runner = createRecordingRunner({
       herdr: { exitCode: 0, stdout: fixture("worktree-create.json"), stderr: "" },
     });
+
     const client = createHerdrClient(runner, undefined);
 
     expect(
@@ -164,6 +169,7 @@ describe("Herdr client", () => {
     const runner = createRecordingRunner({
       herdr: { exitCode: 0, stdout: "", stderr: "" },
     });
+
     const client = createHerdrClient(runner, undefined);
 
     client.openWorktree({
@@ -258,6 +264,7 @@ describe("Herdr client", () => {
     const runner = createRecordingRunner({
       "/opt/herdr": { exitCode: 0, stdout: fixture("plugin-list.json"), stderr: "" },
     });
+
     const client = createHerdrClient(runner, "/opt/herdr");
 
     expect(client.listPlugins()[0]?.pluginId).toBe("probe");
@@ -268,9 +275,11 @@ describe("Herdr client", () => {
     const runner = createRecordingRunner({
       herdr: { exitCode: 7, stdout: "", stderr: "socket unavailable" },
     });
+
     const client = createHerdrClient(runner, undefined);
 
     let failure: unknown;
+
     try {
       client.closeWorkspace("w2", undefined);
     } catch (error) {
@@ -279,6 +288,7 @@ describe("Herdr client", () => {
 
     expect(failure).toBeInstanceOf(CommandFailure);
     expect(failure).toMatchObject({ label: "herdr workspace close", exitCode: 7 });
+    // SAFETY: The asserted value is constrained by the surrounding validation or fixture.
     expect((failure as Error).message).toBe(
       "herdr workspace close failed with exit code 7: socket unavailable",
     );
@@ -289,10 +299,12 @@ describe("Herdr client", () => {
       createRecordingRunner({ herdr: { exitCode: 1, stdout: "", stderr: "no socket" } }),
       undefined,
     );
+
     const malformed = createHerdrClient(
       createRecordingRunner({ herdr: { exitCode: 0, stdout: "not json", stderr: "" } }),
       undefined,
     );
+
     const throwing = createHerdrClient(
       {
         run: () => {
@@ -312,6 +324,7 @@ describe("Herdr client", () => {
       createRecordingRunner({ herdr: { exitCode: 1, stdout: "", stderr: "no socket" } }),
       undefined,
     );
+
     const malformed = createHerdrClient(
       createRecordingRunner({ herdr: { exitCode: 0, stdout: "not json", stderr: "" } }),
       undefined,
@@ -326,26 +339,31 @@ describe("Herdr client", () => {
       createRecordingRunner({ herdr: { exitCode: 0, stdout: "not json", stderr: "" } }),
       undefined,
     );
+
     const invalidEnvelope = createHerdrClient(
       createRecordingRunner({ herdr: { exitCode: 0, stdout: "[]", stderr: "" } }),
       undefined,
     );
+
     const noWorktrees = createHerdrClient(
       createRecordingRunner({
         herdr: { exitCode: 0, stdout: fixture("workspace-get.json"), stderr: "" },
       }),
       undefined,
     );
+
     const noPlugins = createHerdrClient(
       createRecordingRunner({ herdr: { exitCode: 0, stdout: '{"result":{}}', stderr: "" } }),
       undefined,
     );
+
     const eventEnvelope = createHerdrClient(
       createRecordingRunner({
         herdr: { exitCode: 0, stdout: fixture("worktree-created-event.json"), stderr: "" },
       }),
       undefined,
     );
+
     const missingCreateIds = createHerdrClient(
       createRecordingRunner({ herdr: { exitCode: 0, stdout: '{"result":{}}', stderr: "" } }),
       undefined,
@@ -396,6 +414,7 @@ describe("Herdr client", () => {
         }),
         undefined,
       );
+
       expect(() =>
         client.createWorktree({
           cwd: "/tmp/probe/repo",

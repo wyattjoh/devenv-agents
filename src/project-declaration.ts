@@ -36,46 +36,66 @@ const EMPTY_DECLARATION: ProjectDeclaration = {
 
 const REFERENCE_GRANTS: readonly ReferenceGrant[] = ["tree", "module", "services"];
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+type ProjectDeclarationValue =
+  | string
+  | readonly ProjectDeclarationValue[]
+  | ProjectDeclarationRecord;
 
-const readString = (record: Record<string, unknown>, key: string): string | undefined => {
+type ProjectDeclarationRecord = { readonly [key: string]: ProjectDeclarationValue | undefined };
+
+const isRecord = (value: unknown): value is ProjectDeclarationRecord =>
+  value !== null && !Array.isArray(value) && value === Object(value);
+
+const isString = (value: unknown): value is string => value === String(value);
+
+const readString = (record: ProjectDeclarationRecord, key: string): string | undefined => {
   const value = record[key];
+
   if (value === undefined) return undefined;
-  if (typeof value !== "string")
-    throw new Error(`Project declaration field '${key}' must be a string`);
+
+  if (!isString(value)) throw new Error(`Project declaration field '${key}' must be a string`);
+
   return value;
 };
 
-const readStringArray = (value: unknown, field: string): string[] => {
+const readStringArray = (value: ProjectDeclarationValue | undefined, field: string): string[] => {
   if (value === undefined) return [];
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+
+  if (!Array.isArray(value) || value.some((item) => !isString(item))) {
     throw new Error(`Project declaration field '${field}' must be an array of strings`);
   }
+
   return [...value];
 };
 
 const isReferenceGrant = (value: string): value is ReferenceGrant =>
-  REFERENCE_GRANTS.includes(value as ReferenceGrant);
+  REFERENCE_GRANTS.some((grant) => grant === value);
 
-const readGrants = (value: unknown): ReferenceGrant[] => {
+const readGrants = (value: ProjectDeclarationValue | undefined): ReferenceGrant[] => {
   const values = Array.isArray(value) ? value : [value];
+
   if (values.length === 1 && values[0] === undefined) return [];
-  if (values.some((item) => typeof item !== "string" || !isReferenceGrant(item as string))) {
+
+  if (values.some((item) => !isString(item) || !isReferenceGrant(item))) {
     throw new Error("Project declaration reference grant must be tree, module, or services");
   }
-  return values as ReferenceGrant[];
+
+  return values;
 };
 
-const readReferences = (value: unknown): ProjectReference[] => {
+const readReferences = (value: ProjectDeclarationValue | undefined): ProjectReference[] => {
   if (value === undefined) return [];
+
   if (!Array.isArray(value)) throw new Error("Project declaration references must be an array");
+
   return value.map((entry, index) => {
     if (!isRecord(entry)) throw new Error(`Project declaration reference ${index} must be a table`);
     const repo = readString(entry, "repo");
+
     if (repo === undefined || repo.length === 0) {
       throw new Error(`Project declaration reference ${index} requires repo`);
     }
+
     return { repo, grant: readGrants(entry.grant) };
   });
 };
@@ -91,17 +111,23 @@ const readReferences = (value: unknown): ProjectReference[] => {
  */
 export const readProjectDeclaration = (projectRoot: string): ProjectDeclaration => {
   const path = join(projectRoot, PROJECT_DECLARATION_PATH);
+
   if (!existsSync(path)) return { ...EMPTY_DECLARATION };
 
+  // SAFETY: TOML parsing accepts arbitrary source text and is validated below.
   const parsed = Bun.TOML.parse(readFileSync(path, "utf8")) as unknown;
+
   if (!isRecord(parsed)) throw new Error("Project declaration must be a TOML table");
 
   const services = parsed.services;
+
   if (services !== undefined && !isRecord(services)) {
     throw new Error("Project declaration services must be a TOML table");
   }
+
   const session = readString(parsed, "session");
   const scopedServices = readStringArray(services?.scoped, "services.scoped");
+
   return {
     session,
     scopedServices,

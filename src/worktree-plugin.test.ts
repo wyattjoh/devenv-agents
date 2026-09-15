@@ -15,6 +15,7 @@ import { PROJECT_PLUGIN_ID, runPluginInstall, runWorktreeEvent } from "./worktre
 type WorktreeEventOptions = Parameters<typeof runWorktreeEvent>[0];
 
 const created: string[] = [];
+
 const pluginRoot = fileURLToPath(new URL("../plugin", import.meta.url));
 
 const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
@@ -35,11 +36,7 @@ const projectPlugin = (overrides: Partial<HerdrPlugin> = {}): HerdrPlugin => ({
   ...overrides,
 });
 
-const makeProject = (): {
-  readonly root: string;
-  readonly mainCheckout: string;
-  readonly worktreePath: string;
-} => {
+const makeProject = () => {
   const root = mkdtempSync("/tmp/devenv-agents-plugin-");
   const mainCheckout = join(root, "main");
   const worktreePath = join(root, "worktree");
@@ -47,6 +44,7 @@ const makeProject = (): {
   mkdirSync(worktreePath);
   writeFileSync(join(mainCheckout, ".agents", "project.toml"), 'session = "fixture"\n');
   created.push(root);
+
   return {
     root,
     mainCheckout: realpathSync(mainCheckout),
@@ -78,6 +76,7 @@ afterEach(() => {
 
 describe("worktree plugin manifest", () => {
   it("declares the three lifecycle events and an unfocused setup overlay", () => {
+    // SAFETY: The asserted value is constrained by the surrounding validation or fixture.
     const manifest = Bun.TOML.parse(
       readFileSync(join(pluginRoot, "herdr-plugin.toml"), "utf8"),
     ) as {
@@ -118,10 +117,12 @@ describe("worktree plugin event hook", () => {
     const [gitKey, gitResult] = gitResponse(mainCheckout, worktreePath);
     const requestedPaths: string[] = [];
     let requestCount = 0;
+
     const bootstrap = createFakeWorktreeBootstrap({
       request: ({ worktreePath: requestedPath }) => {
         requestedPaths.push(requestedPath);
         requestCount += 1;
+
         return {
           state: "running",
           claimed: requestCount === 1,
@@ -130,17 +131,23 @@ describe("worktree plugin event hook", () => {
         };
       },
     });
+
     const herdrClient = createFakeHerdrClient();
+
     const runner = createRecordingRunner({
       [gitKey]: gitResult,
       "devenv shell -- true": result(0),
     });
+
+    // SAFETY: The asserted value is constrained by the surrounding validation or fixture.
     const eventPayload = JSON.parse(fixture("worktree-created-event.json")) as {
       worktree: { path: string };
     };
+
     eventPayload.worktree.path = worktreePath;
     const eventJson = JSON.stringify(eventPayload);
     const first = runWorktreeEvent(eventOptions(runner, eventJson, herdrClient, bootstrap));
+
     const second = runWorktreeEvent(
       eventOptions(
         runner,
@@ -149,6 +156,7 @@ describe("worktree plugin event hook", () => {
         bootstrap,
       ),
     );
+
     expect(first).toEqual({
       exitCode: 0,
       worktreePath,
@@ -166,9 +174,11 @@ describe("worktree plugin event hook", () => {
     const { mainCheckout, worktreePath } = makeProject();
     const [gitKey, gitResult] = gitResponse(mainCheckout, worktreePath);
     const requestedPaths: string[] = [];
+
     const bootstrap = createFakeWorktreeBootstrap({
       request: ({ worktreePath: requestedPath }) => {
         requestedPaths.push(requestedPath);
+
         return {
           state: "running",
           claimed: true,
@@ -177,6 +187,7 @@ describe("worktree plugin event hook", () => {
         };
       },
     });
+
     const herdrClient = createFakeHerdrClient({
       resolveWorktree: () => ({
         path: worktreePath,
@@ -186,6 +197,7 @@ describe("worktree plugin event hook", () => {
         prunable: false,
       }),
     });
+
     const runner = createRecordingRunner({ [gitKey]: gitResult });
 
     const event = runWorktreeEvent({
@@ -208,9 +220,11 @@ describe("worktree plugin event hook", () => {
     const { mainCheckout, worktreePath } = makeProject();
     const [gitKey, gitResult] = gitResponse(mainCheckout, worktreePath);
     let requestCount = 0;
+
     const bootstrap = createFakeWorktreeBootstrap({
       request: () => {
         requestCount += 1;
+
         return requestCount === 1
           ? {
               state: "failed",
@@ -226,6 +240,7 @@ describe("worktree plugin event hook", () => {
             };
       },
     });
+
     const herdrClient = createFakeHerdrClient();
     const runner = createRecordingRunner({ [gitKey]: gitResult });
 
@@ -249,6 +264,7 @@ describe("worktree plugin event hook", () => {
         bootstrap,
       ),
     );
+
     expect(second.opened).toBe(true);
   });
 
@@ -269,6 +285,7 @@ describe("worktree plugin event hook", () => {
 
   it("stays fail-open when the client cannot resolve an event workspace", () => {
     const runner = createRecordingRunner();
+
     const event = runWorktreeEvent({
       eventJson: JSON.stringify({ workspace: { workspace_id: "w42" } }),
       bootstrap: createFakeWorktreeBootstrap(),
@@ -296,6 +313,7 @@ describe("worktree plugin event hook", () => {
 describe("plugin install", () => {
   it("links the plugin when the Herdr registry has no matching entry", () => {
     const linkedPaths: string[] = [];
+
     const herdrClient = createFakeHerdrClient({
       listPlugins: () => [],
       linkPlugin: (path) => linkedPaths.push(path),
@@ -325,6 +343,7 @@ describe("plugin install", () => {
 
   it("enables a matching local plugin when it is disabled", () => {
     const enabledIds: string[] = [];
+
     const herdrClient = createFakeHerdrClient({
       listPlugins: () => [projectPlugin({ enabled: false })],
       enablePlugin: (pluginId) => enabledIds.push(pluginId),
@@ -341,6 +360,7 @@ describe("plugin install", () => {
 
   it("re-links a matching local plugin when its manifest version changed", () => {
     const actions: string[] = [];
+
     const herdrClient = createFakeHerdrClient({
       listPlugins: () => [projectPlugin({ version: "0.0.9" })],
       unlinkPlugin: (pluginId) => actions.push(`unlink:${pluginId}`),

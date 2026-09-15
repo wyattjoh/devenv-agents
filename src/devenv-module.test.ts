@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { withGitFixture } from "./testing/git-fixture.ts";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+
 const shellTest = fileURLToPath(new URL("../tests/module-shell.test.sh", import.meta.url));
+
 const gitRepositoryEnvironmentKeys = new Set([
   "GIT_DIR",
   "GIT_WORK_TREE",
@@ -49,6 +51,7 @@ describe("devenv agents module", () => {
       writeEnvironment(fixture.worktree, repositoryRoot);
 
       const home = mkdtempSync(`${tmpdir()}/devenv-agents-module-home-`);
+
       try {
         const env = withoutGitRepositoryEnvironment({
           ...process.env,
@@ -60,6 +63,7 @@ describe("devenv agents module", () => {
           GH_CONFIG_DIR: `${home}/caller-gh`,
           PI_CODING_AGENT_DIR: `${home}/caller-pi`,
         });
+
         const result = Bun.spawnSync(["bash", shellTest, fixture.repository, fixture.worktree], {
           cwd: fixture.worktree,
           env,
@@ -72,6 +76,7 @@ describe("devenv agents module", () => {
             [result.stdout.toString(), result.stderr.toString()].filter(Boolean).join("\n"),
           );
         }
+
         expect(result.exitCode).toBe(0);
       } finally {
         rmSync(home, { recursive: true, force: true });

@@ -15,17 +15,24 @@ import {
 } from "./testing/command-runner.ts";
 
 type BootstrapDependencies = Parameters<typeof createWorktreeBootstrap>[0];
+
 type BootstrapRunOptions = Parameters<WorktreeBootstrap["run"]>[0];
+
 type BootstrapAwaitOptions = Parameters<WorktreeBootstrap["await"]>[0];
+
 type TestRunOptions = BootstrapDependencies & BootstrapRunOptions;
 
 type RequestOptions = Parameters<WorktreeBootstrap["request"]>[0] &
   Pick<BootstrapDependencies, "herdrClient" | "now">;
 
 type RequestResult = ReturnType<WorktreeBootstrap["request"]>;
+
 type InspectOptions = Parameters<WorktreeBootstrap["inspect"]>[0];
+
 type Inspection = ReturnType<WorktreeBootstrap["inspect"]>;
+
 type AwaitResult = ReturnType<WorktreeBootstrap["await"]>;
+
 type AwaitTestOptions = BootstrapAwaitOptions & { readonly now: BootstrapDependencies["now"] };
 
 type ForgetOptions = Parameters<WorktreeBootstrap["forget"]>[0];
@@ -73,6 +80,7 @@ const requestWorktreeBootstrap = (options: RequestOptions): RequestResult => {
     syncReferences: () => undefined,
     now: options.now,
   });
+
   return bootstrap.request({
     mainCheckout: options.mainCheckout,
     worktreePath: options.worktreePath,
@@ -81,11 +89,13 @@ const requestWorktreeBootstrap = (options: RequestOptions): RequestResult => {
 
 const runWorktreeBootstrap = (options: TestRunOptions): ReturnType<WorktreeBootstrap["run"]> => {
   const { herdrClient, runner, syncReferences, now, ...runOptions } = options;
+
   return createWorktreeBootstrap({ herdrClient, runner, syncReferences, now }).run(runOptions);
 };
 
 const awaitWorktreeBootstrap = (options: AwaitTestOptions): AwaitResult => {
   const { now, ...awaitOptions } = options;
+
   return createWorktreeBootstrap({
     herdrClient: createFakeHerdrClient(),
     runner: createRecordingRunner(),
@@ -116,9 +126,11 @@ describe("worktree bootstrap", () => {
     withGitFixture((fixture) => {
       prepareFixture(fixture);
       const opened: string[] = [];
+
       const herdrClient = createFakeHerdrClient({
         openPluginPane: ({ cwd }) => opened.push(cwd),
       });
+
       const options = {
         mainCheckout: fixture.repository,
         worktreePath: fixture.worktree,
@@ -146,9 +158,11 @@ describe("worktree bootstrap", () => {
       prepareFixture(fixture);
       const runner = createRecordingRunner({ devenv: result(0) });
       let syncCalls = 0;
+
       const options = makeRunOptions(fixture, runner, () => {
         syncCalls += 1;
       });
+
       requestWorktreeBootstrap({
         mainCheckout: fixture.repository,
         worktreePath: fixture.worktree,
@@ -180,20 +194,25 @@ describe("worktree bootstrap", () => {
     withGitFixture((fixture) => {
       prepareFixture(fixture);
       const sequence: string[] = [];
+
       const runner = createRecordingRunner({
         "devenv allow": () => {
           sequence.push("devenv allow");
+
           return result(0);
         },
         "direnv allow": () => {
           sequence.push("direnv allow");
+
           return result(0);
         },
         "devenv shell -- true": () => {
           sequence.push("devenv shell -- true");
+
           return result(0);
         },
       });
+
       const options = makeRunOptions(fixture, runner, () => sequence.push("sync"));
 
       const bootstrap = runWorktreeBootstrap(options);
@@ -235,10 +254,12 @@ describe("worktree bootstrap", () => {
   it("records a failure and preserves its error for inspection", () => {
     withGitFixture((fixture) => {
       prepareFixture(fixture);
+
       const runner = createRecordingRunner({
         "devenv allow": result(0),
         "devenv shell -- true": result(1, "", "warm exploded"),
       });
+
       const options = makeRunOptions(fixture, runner, () => undefined);
 
       const bootstrap = runWorktreeBootstrap(options);
@@ -267,6 +288,7 @@ describe("worktree bootstrap", () => {
         now: options.now,
       });
       let runs = 0;
+
       const awaitedDone = awaitWorktreeBootstrap({
         mainCheckout: fixture.repository,
         worktreePath: fixture.worktree,
@@ -277,6 +299,7 @@ describe("worktree bootstrap", () => {
           runWorktreeBootstrap(options);
         },
       });
+
       expect(awaitedDone).toEqual({ state: "done", error: undefined });
       expect(runs).toBe(1);
 
@@ -284,10 +307,12 @@ describe("worktree bootstrap", () => {
         mainCheckout: fixture.repository,
         worktreePath: fixture.worktree,
       });
+
       const failed = runWorktreeBootstrap({
         ...options,
         runner: createRecordingRunner({ "devenv allow": result(1, "", "allow failed") }),
       });
+
       expect(failed.state).toBe("failed");
       expect(
         awaitWorktreeBootstrap({
@@ -312,6 +337,7 @@ describe("worktree bootstrap", () => {
         now: options.now,
       });
       let current = 0;
+
       const timeout = awaitWorktreeBootstrap({
         mainCheckout: fixture.repository,
         worktreePath: fixture.worktree,
@@ -321,6 +347,7 @@ describe("worktree bootstrap", () => {
           current += 1;
         },
       });
+
       expect(timeout).toEqual({ state: "timeout", error: undefined });
     }, fixtureOptions);
   });

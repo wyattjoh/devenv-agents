@@ -50,12 +50,14 @@ describe("createGitFixture", () => {
       GIT_DIR: join(decoy, ".git"),
       GIT_INDEX_FILE: join(decoy, ".git", "index"),
     };
+
     const fixture = createGitFixture({
       prefix: undefined,
       branch: undefined,
       worktreeName: undefined,
       env: poisonedEnvironment,
     });
+
     created.push(fixture.root);
 
     expect(existsSync(join(fixture.repository, ".git"))).toBe(true);

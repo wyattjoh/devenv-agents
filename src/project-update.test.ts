@@ -69,6 +69,7 @@ describe("project update", () => {
     const mainCheckout = realpathSync(fixture.repository);
     const worktrees = listedWorktreePaths(fixture.repository);
     expect(worktrees).toHaveLength(2);
+
     const runner = gitRunner({
       "devenv update agents": result(0),
       "devenv shell -- true": [result(0), result(1, "", "branch lock drift"), result(0)],
@@ -131,6 +132,7 @@ describe("project update", () => {
 
     const mainCheckout = realpathSync(fixture.repository);
     const missingWorktree = join(realpathSync(fixture.root), "worktree");
+
     const runner = gitRunner({
       "devenv update agents": result(0),
       "devenv shell -- true": result(0),
@@ -149,6 +151,7 @@ describe("project update", () => {
   it("captures an agents-input failure while still attempting every rebuild", () => {
     const fixture = createFixture("devenv-agents-update-input-");
     created.push(fixture.root);
+
     const runner = gitRunner({
       "devenv update agents": result(1, "", "network unavailable"),
       "devenv shell -- true": result(0),
@@ -175,6 +178,7 @@ describe("project update", () => {
   it("captures a worktree-list failure and still reports the completed steps", () => {
     const fixture = createFixture("devenv-agents-update-list-");
     created.push(fixture.root);
+
     const runner = createRecordingRunner({
       git: (invocation) =>
         invocation.args.includes("worktree")
@@ -201,11 +205,14 @@ describe("project update", () => {
   it("prints captured worktree failures and returns non-zero through the CLI", () => {
     const fixture = createFixture("devenv-agents-update-cli-");
     created.push(fixture.root);
+
     const runner = gitRunner({
       "devenv update agents": result(0),
       "devenv shell -- true": [result(0), result(1, "", "worktree build failed")],
     });
+
     const output = captureOutput();
+
     const dependencies = createCliDependencies({
       cwd: fixture.repository,
       runner,
@@ -225,23 +232,29 @@ describe("project update", () => {
     const firstFixture = createFixture("devenv-agents-update-first-");
     const secondFixture = createFixture("devenv-agents-update-second-");
     created.push(firstFixture.root, secondFixture.root);
+
     const first: ProjectRegistration = {
       repo: "github.com/example/first",
       path: firstFixture.repository,
       session: "first",
     };
+
     const second: ProjectRegistration = {
       repo: "github.com/example/second",
       path: secondFixture.repository,
       session: "second",
     };
+
     writeProjectsFile({ project: first, projectsFile });
     writeProjectsFile({ project: second, projectsFile });
+
     const runner = gitRunner({
       "devenv update agents": result(0),
       "devenv shell -- true": result(0),
     });
+
     const output = captureOutput();
+
     const dependencies = createCliDependencies({
       runner,
       environment: {

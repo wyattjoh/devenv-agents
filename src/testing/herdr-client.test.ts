@@ -13,6 +13,7 @@ describe("fake Herdr client", () => {
         prunable: false,
       },
     ];
+
     const client = createFakeHerdrClient({
       listWorktrees: () => worktrees,
     });

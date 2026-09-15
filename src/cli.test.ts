@@ -107,6 +107,7 @@ describe("project CLI", () => {
         },
       ],
     });
+
     const addDependencies = () =>
       createCliDependencies({
         herdrClient,
@@ -120,6 +121,7 @@ describe("project CLI", () => {
         },
         readLine: () => "",
       });
+
     const createDependencies = () =>
       createCliDependencies({
         cwd: checkout,
@@ -132,6 +134,7 @@ describe("project CLI", () => {
         }),
         readLine: () => "",
       });
+
     const cases = [
       {
         args: ["add", "github.com/example/widget"],
@@ -219,11 +222,13 @@ describe("project CLI", () => {
       const output = captureOutput();
 
       expect(runCli(testCase.args, output.io, testCase.dependencies())).toBe(testCase.exitCode);
+
       if (testCase.stdoutContains === undefined) {
         expect(output.stdout()).toBe(testCase.stdout);
       } else {
         expect(output.stdout()).toContain(testCase.stdoutContains);
       }
+
       expect(output.stderr()).toStartWith(testCase.stderr);
     }
   });
@@ -240,21 +245,27 @@ describe("project CLI", () => {
       { repo: "github.com/example/first", path: first, session: "first" },
       { repo: "github.com/example/second", path: second, session: "second" },
     ];
+
     const runner = createRecordingRunner({
       git: (invocation) => {
         if (invocation.args.includes("rev-parse") && invocation.args.includes(first)) {
           return result(1, "", "first\nsecond");
         }
+
         if (invocation.args.includes("rev-parse")) {
           return result(0, `${invocation.args[1]}/.git\n`);
         }
+
         if (invocation.args.includes("worktree") && invocation.args.includes("list")) {
           return result(0, `worktree ${second}\nHEAD fixture\nbranch refs/heads/main\n`);
         }
+
         return result(0);
       },
     });
+
     const output = captureOutput();
+
     const dependencies = createCliDependencies({
       enumerateProjects: () => projects,
       runner,
@@ -351,6 +362,7 @@ describe("project CLI", () => {
     for (const command of commands) {
       const output = captureOutput();
       const runner = createRecordingRunner();
+
       const dependencies = createCliDependencies({
         runner,
         environment: { PROJECT_PLATFORM: "freebsd" },
@@ -382,6 +394,7 @@ describe("project CLI", () => {
       ),
       devenv: result(0),
     });
+
     const dependencies = createCliDependencies({
       cwd: worktreePath,
       runner,
@@ -392,6 +405,7 @@ describe("project CLI", () => {
         syncReferences: () => undefined,
       }),
     });
+
     const output = captureOutput();
 
     expect(runCli(["worktree-setup"], output.io, dependencies)).toBe(0);
@@ -408,6 +422,7 @@ describe("project CLI", () => {
   it("runs interactive setup through the bootstrap interface", () => {
     const bootstrapCalls: string[] = [];
     const prompts: string[] = [];
+
     const bootstrap = createFakeWorktreeBootstrap({
       run: (options) => {
         bootstrapCalls.push(options.worktreePath);
@@ -417,13 +432,16 @@ describe("project CLI", () => {
           state: "failed",
           error: "warm exploded",
         });
+
         return { exitCode: 0, state: "done", error: undefined };
       },
     });
+
     const dependencies = createCliDependencies({
       cwd: "/tmp/fixture-worktree",
       bootstrap,
     });
+
     const output = captureOutput();
 
     expect(runCli(["worktree-setup", "--interactive"], output.io, dependencies)).toBe(0);
@@ -438,6 +456,7 @@ describe("project CLI", () => {
     const bootstrap = createFakeWorktreeBootstrap({
       run: () => ({ exitCode: 1, state: "failed", error: undefined }),
     });
+
     const dependencies = createCliDependencies({ bootstrap });
     const output = captureOutput();
 
@@ -456,16 +475,20 @@ describe("project CLI", () => {
     created.push(root);
 
     const requested: string[] = [];
+
     const bootstrap = createFakeWorktreeBootstrap({
       request: ({ worktreePath: requestedPath }) => {
         requested.push(requestedPath);
+
         return { state: "running", claimed: true, opened: true, error: undefined };
       },
     });
+
     const runner = createRecordingRunner({
       [`git -C ${realpathSync(worktreePath)} rev-parse --path-format=absolute --git-common-dir`]:
         result(0, `${mainCheckout}/.git\n`),
     });
+
     const dependencies = createCliDependencies({
       cwd: worktreePath,
       runner,
@@ -474,6 +497,7 @@ describe("project CLI", () => {
         HERDR_PLUGIN_EVENT_JSON: JSON.stringify({ worktree: { path: worktreePath } }),
       },
     });
+
     const output = captureOutput();
 
     expect(runCli(["wt", "on-event"], output.io, dependencies)).toBe(0);
@@ -504,7 +528,9 @@ describe("project CLI", () => {
         `${projectRoot}/.git\n`,
       ),
     });
+
     const output = captureOutput();
+
     const dependencies = createCliDependencies({
       cwd: worktreePath,
       runner,
@@ -526,6 +552,7 @@ describe("project CLI", () => {
   it("dispatches plugin install through the injected Herdr client", () => {
     const runner = createRecordingRunner();
     const herdrClient = createFakeHerdrClient({ listPlugins: () => [] });
+
     const dependencies = createCliDependencies({
       runner,
       herdrClient,
@@ -533,6 +560,7 @@ describe("project CLI", () => {
         DEVENV_AGENTS_PLUGIN_PATH: new URL("../plugin", import.meta.url).pathname,
       },
     });
+
     const output = captureOutput();
 
     expect(runCli(["plugin", "install"], output.io, dependencies)).toBe(0);

@@ -20,6 +20,7 @@ import { withGitFixture } from "./testing/git-fixture.ts";
 import { createRecordingRunner, type CommandResult } from "./testing/command-runner.ts";
 
 type SyncRequest = Parameters<SyncReferences>[0];
+
 type SyncOptions = Parameters<typeof createSyncReferences>[0];
 
 const runSync = (request: SyncRequest, options: SyncOptions = {}): void => {
@@ -36,13 +37,7 @@ const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
   stderr,
 });
 
-const makeProject = (
-  declaration: string,
-): {
-  readonly root: string;
-  readonly projectRoot: string;
-  readonly worktreePath: string;
-} => {
+const makeProject = (declaration: string) => {
   const root = mkdtempSync(join("/tmp", "devenv-agents-sync-"));
   const projectRoot = join(root, "project");
   const worktreePath = join(root, "worktree");
@@ -50,6 +45,7 @@ const makeProject = (
   mkdirSync(worktreePath);
   writeFileSync(join(projectRoot, ".agents", "project.toml"), declaration);
   created.push(root);
+
   return { root, projectRoot, worktreePath };
 };
 
@@ -66,11 +62,17 @@ const makeSibling = (home: string, repo: string, declaration: string): string =>
   const checkout = join(home, "code", ...repo.split("/"));
   mkdirSync(join(checkout, ".agents"), { recursive: true });
   writeFileSync(join(checkout, ".agents", "project.toml"), declaration);
+
   return realpathSync(checkout);
 };
 
-const readYaml = (path: string): Record<string, unknown> =>
-  Bun.YAML.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+type YamlValue = string | number | boolean | null | readonly YamlValue[] | YamlRecord;
+
+type YamlRecord = { readonly [key: string]: YamlValue };
+
+const readYaml = (path: string): YamlRecord =>
+  // SAFETY: Test fixtures supply YAML mappings consumed only by these assertions.
+  Bun.YAML.parse(readFileSync(path, "utf8")) as YamlRecord;
 
 afterEach(() => {
   for (const path of created.splice(0)) rmSync(path, { recursive: true, force: true });
@@ -93,6 +95,7 @@ describe("project reference synchronization", () => {
   it("materializes tree, module, and service grants from a Linux code root", () => {
     const home = mkdtempSync(join("/tmp", "devenv-agents-sync-home-"));
     created.push(home);
+
     const project = makeProject(
       [
         'session = "consumer"',
@@ -103,11 +106,13 @@ describe("project reference synchronization", () => {
         "",
       ].join("\n"),
     );
+
     const sibling = makeSibling(
       home,
       "github.com/acme/provider",
       ["[services]", 'scoped = ["postgres", "redis"]', ""].join("\n"),
     );
+
     const runner = createRecordingRunner({
       "devenv eval processes": result(
         0,
@@ -158,9 +163,11 @@ describe("project reference synchronization", () => {
   it("preserves unrelated local Claude settings and existing directories", () => {
     const home = mkdtempSync(join("/tmp", "devenv-agents-sync-home-"));
     created.push(home);
+
     const project = makeProject(
       ["[[references]]", 'repo = "github.com/acme/docs"', 'grant = ["tree"]', ""].join("\n"),
     );
+
     const sibling = makeSibling(home, "github.com/acme/docs", "");
     mkdirSync(join(project.worktreePath, ".claude"));
     writeFileSync(
@@ -201,6 +208,7 @@ describe("project reference synchronization", () => {
   it("preserves unrelated devenv content and reconciles owned inputs and endpoints", () => {
     const home = mkdtempSync(join("/tmp", "devenv-agents-sync-home-"));
     created.push(home);
+
     const project = makeProject(
       [
         "[[references]]",
@@ -209,11 +217,13 @@ describe("project reference synchronization", () => {
         "",
       ].join("\n"),
     );
+
     const sibling = makeSibling(
       home,
       "github.com/acme/provider",
       ["[services]", 'scoped = ["postgres"]', ""].join("\n"),
     );
+
     writeFileSync(
       join(project.worktreePath, "devenv.local.yaml"),
       [
@@ -246,6 +256,7 @@ describe("project reference synchronization", () => {
       platform: "linux" as const,
       resolveServiceEndpoint: () => ({ host: "127.0.0.1", port: 5440 }),
     };
+
     syncProjectReferences(requestFor(project.projectRoot, project.worktreePath), options);
 
     expect(readYaml(join(project.worktreePath, "devenv.local.yaml"))).toEqual({
@@ -297,6 +308,7 @@ describe("project reference synchronization", () => {
   it("removes generated overlay and endpoint files when references disappear", () => {
     const home = mkdtempSync(join("/tmp", "devenv-agents-sync-home-"));
     created.push(home);
+
     const project = makeProject(
       [
         "[[references]]",
@@ -305,16 +317,19 @@ describe("project reference synchronization", () => {
         "",
       ].join("\n"),
     );
+
     makeSibling(
       home,
       "github.com/acme/provider",
       ["[services]", 'scoped = ["postgres"]', ""].join("\n"),
     );
+
     const options = {
       homeDirectory: home,
       platform: "linux" as const,
       resolveServiceEndpoint: () => ({ host: "localhost", port: 5440 }),
     };
+
     syncProjectReferences(requestFor(project.projectRoot, project.worktreePath), options);
     expect(existsSync(join(project.worktreePath, "devenv.local.yaml"))).toBe(true);
     expect(existsSync(join(project.projectRoot, ".devenv", "state", "references.env"))).toBe(true);
@@ -329,6 +344,7 @@ describe("project reference synchronization", () => {
   it("rejects module identity collisions instead of overwriting an input", () => {
     const home = mkdtempSync(join("/tmp", "devenv-agents-sync-home-"));
     created.push(home);
+
     const project = makeProject(
       [
         "[[references]]",
@@ -341,6 +357,7 @@ describe("project reference synchronization", () => {
         "",
       ].join("\n"),
     );
+
     makeSibling(home, "github.com/acme-one/shared", "");
     makeSibling(home, "github.com/acme-two/shared", "");
 
@@ -356,6 +373,7 @@ describe("project reference synchronization", () => {
   it("rejects service identity collisions instead of overwriting endpoint variables", () => {
     const home = mkdtempSync(join("/tmp", "devenv-agents-sync-home-"));
     created.push(home);
+
     const project = makeProject(
       [
         "[[references]]",
@@ -368,6 +386,7 @@ describe("project reference synchronization", () => {
         "",
       ].join("\n"),
     );
+
     makeSibling(home, "github.com/acme-one/shared", '[services]\nscoped = ["postgres"]\n');
     makeSibling(home, "github.com/acme-two/shared", '[services]\nscoped = ["postgres"]\n');
 
@@ -385,9 +404,11 @@ describe("project reference synchronization", () => {
     const home = mkdtempSync(join("/tmp", "devenv-agents-sync-home-"));
     const outside = mkdtempSync(join("/tmp", "devenv-agents-sync-outside-"));
     created.push(home, outside);
+
     const project = makeProject(
       ["[[references]]", 'repo = "github.com/acme/escaped"', 'grant = ["tree"]', ""].join("\n"),
     );
+
     mkdirSync(join(home, "code", "github.com", "acme"), { recursive: true });
     symlinkSync(outside, join(home, "code", "github.com", "acme", "escaped"), "dir");
 
@@ -415,6 +436,7 @@ describe("project reference synchronization", () => {
           ),
         );
         const output = captureOutput();
+
         const dependencies = createCliDependencies({
           cwd: fixture.worktree,
           runner: defaultCommandRunner,
@@ -442,9 +464,11 @@ describe("project reference synchronization", () => {
   it("uses the Darwin code root when resolving a reference", () => {
     const home = mkdtempSync(join("/tmp", "devenv-agents-sync-home-"));
     created.push(home);
+
     const project = makeProject(
       ["[[references]]", 'repo = "github.com/acme/mac-project"', 'grant = ["tree"]', ""].join("\n"),
     );
+
     const siblingPath = join(home, "Code", "github.com", "acme", "mac-project");
     mkdirSync(siblingPath, { recursive: true });
     const sibling = realpathSync(siblingPath);
@@ -454,15 +478,18 @@ describe("project reference synchronization", () => {
       platform: "darwin",
     });
 
+    // SAFETY: The asserted value is constrained by the surrounding validation or fixture.
     const settings = JSON.parse(
       readFileSync(join(project.worktreePath, ".claude", "settings.local.json"), "utf8"),
     ) as { permissions: { additionalDirectories: string[] } };
+
     expect(settings.permissions.additionalDirectories).toEqual([sibling]);
   });
 
   it("writes available references before reporting all missing checkouts", () => {
     const home = mkdtempSync(join("/tmp", "devenv-agents-sync-home-"));
     created.push(home);
+
     const project = makeProject(
       [
         "[[references]]",
@@ -479,6 +506,7 @@ describe("project reference synchronization", () => {
         "",
       ].join("\n"),
     );
+
     const available = makeSibling(home, "github.com/acme/available", "");
 
     expect(() =>
@@ -494,6 +522,7 @@ describe("project reference synchronization", () => {
       ),
     ).toEqual({ permissions: { additionalDirectories: [available] } });
     let error: unknown;
+
     try {
       syncProjectReferences(requestFor(project.projectRoot, project.worktreePath), {
         homeDirectory: home,
@@ -502,6 +531,7 @@ describe("project reference synchronization", () => {
     } catch (caught) {
       error = caught;
     }
+
     expect(errorMessage(error)).toContain("github.com/acme/missing-one");
     expect(errorMessage(error)).toContain("github.com/acme/missing-two");
   });
@@ -509,6 +539,7 @@ describe("project reference synchronization", () => {
   it("does not touch the filesystem or runner when no references are declared", () => {
     const project = makeProject('session = "no-references"\n');
     const before = readdirSync(project.worktreePath);
+
     const runner = createRecordingRunner({
       "devenv eval processes": result(1, "", "must not run"),
     });
@@ -526,10 +557,13 @@ describe("project reference synchronization", () => {
   it("can be installed as the setup seam with injected options", () => {
     const home = mkdtempSync(join("/tmp", "devenv-agents-sync-home-"));
     created.push(home);
+
     const project = makeProject(
       ["[[references]]", 'repo = "github.com/acme/provider"', 'grant = ["tree"]', ""].join("\n"),
     );
+
     const sibling = makeSibling(home, "github.com/acme/provider", "");
+
     const syncReferences = createSyncReferences({
       homeDirectory: home,
       platform: "linux",

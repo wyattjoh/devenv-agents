@@ -7,6 +7,7 @@ import { createFakeWorktreeBootstrap } from "./worktree-bootstrap.ts";
  * Captured output channels for CLI tests.
  */
 type CliIO = NonNullable<Parameters<typeof runCli>[1]>;
+
 type CliDependencies = NonNullable<Parameters<typeof runCli>[2]>;
 
 export type CapturedOutput = {
@@ -23,6 +24,7 @@ export type CapturedOutput = {
 export const captureOutput = (): CapturedOutput => {
   let stdout = "";
   let stderr = "";
+
   return {
     io: {
       stdout: (text) => {

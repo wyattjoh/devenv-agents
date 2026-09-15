@@ -104,7 +104,9 @@ describe("command runner", () => {
       const runner = createRecordingRunner({
         "devenv shell -- true": { exitCode: 7, stdout, stderr },
       });
+
       let caught: unknown;
+
       try {
         runRequiredCommand(runner, "devenv shell -- true", "devenv", ["shell", "--", "true"], {
           cwd: "/tmp/project",
@@ -115,6 +117,7 @@ describe("command runner", () => {
       }
 
       expect(caught).toBeInstanceOf(CommandFailure);
+      // SAFETY: The asserted value is constrained by the surrounding validation or fixture.
       const failure = caught as CommandFailure;
       expect(failure.label).toBe("devenv shell -- true");
       expect(failure.exitCode).toBe(7);

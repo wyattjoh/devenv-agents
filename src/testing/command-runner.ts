@@ -33,6 +33,10 @@ const EMPTY_RESULT: CommandResult = {
   stderr: "",
 };
 
+const isResponseSequence = (
+  response: CannedCommandResponse,
+): response is readonly CommandResult[] => Array.isArray(response);
+
 const copyInvocation = (invocation: CommandInvocation): CommandInvocation => ({
   command: invocation.command,
   args: [...invocation.args],
@@ -65,14 +69,19 @@ export const createRecordingRunner = (
     const exactKey = [invocation.command, ...invocation.args].join(" ");
     const responseKey = configured[exactKey] === undefined ? invocation.command : exactKey;
     const response = configured[responseKey];
+
     if (response === undefined) return copyResult(EMPTY_RESULT);
 
-    if (typeof response === "function") return copyResult(response(recorded));
+    if (isResponseSequence(response)) {
+      const index = sequence.get(responseKey) ?? 0;
+      sequence.set(responseKey, index + 1);
+
+      return copyResult(response[Math.min(index, response.length - 1)] ?? EMPTY_RESULT);
+    }
+
     if ("exitCode" in response) return copyResult(response);
 
-    const index = sequence.get(responseKey) ?? 0;
-    sequence.set(responseKey, index + 1);
-    return copyResult(response[Math.min(index, response.length - 1)] ?? EMPTY_RESULT);
+    return copyResult(response(recorded));
   };
 
   return {
