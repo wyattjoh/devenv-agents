@@ -8,9 +8,14 @@ Bun and platform APIs, with no runtime package dependencies.
 
 ```
 Devenv files:
-devenv.nix                     # shared project/worktree environment module
-templates/                    # bun-ts, rust, bare and deno starter environments
-.github/workflows/templates.yml # cross-platform template evaluation
+devenv.nix                              # shared project/worktree environment module
+templates/                             # bun-ts, rust, bare and deno starter environments
+.github/workflows/templates.yml        # cross-platform template evaluation
+
+Automation:
+.github/workflows/ci.yml                # Bun tests, checks, lint, formatting and build
+.github/workflows/update-flake-lock.yml # weekly Nix lockfile pull request
+.github/dependabot.yml                  # weekly Bun and GitHub Actions updates
 
 CLI and tests:
 src/cli.ts                 # source entrypoint and help/version behavior
@@ -48,6 +53,7 @@ an interactive nested `devenv shell`. The packaged `project` wrapper supplies
 Install development tools and lock them locally with `bun install`, then run:
 
 ```sh
+bun install --frozen-lockfile
 bun test
 bun run check
 bun run lint
@@ -61,7 +67,15 @@ nix build .#herdr-plugin
 
 `bun run project -- --help` and `bun run project -- --version` execute the
 source entrypoint. The Nix build creates the standalone `project` binary but it
-is not run by the test suite.
+is not run by the test suite. Pull requests run the Bun gates above and the
+cross-platform template matrix. Dependabot groups weekly patch and minor Bun
+updates, keeps Bun majors separate, and groups GitHub Actions updates. A weekly
+Actions workflow opens the Nix lockfile pull request; because it uses
+`GITHUB_TOKEN`, its pull-request checks require manual workflow approval.
+
+GitHub Actions must be pinned to full commit SHAs with their release tags in
+same-line comments so Dependabot can update both safely. The template workflow
+intentionally installs floating `nixpkgs#devenv` as a compatibility canary.
 
 Use Conventional Commits for changes. Do not edit captured fixtures unless a
 new protocol probe intentionally replaces them.
