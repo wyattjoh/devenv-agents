@@ -1,5 +1,6 @@
 node_modules/
 .pi/
+.claude/worktrees/
 dist/
 result
 result-*

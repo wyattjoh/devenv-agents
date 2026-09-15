@@ -7,6 +7,6 @@
     "dist",
     "result",
     "fixtures/**",
-    ".claude/worktrees"
+    ".claude/worktrees/**"
   ]
 }

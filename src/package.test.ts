@@ -16,9 +16,12 @@ describe("runtime dependency boundary", () => {
     expect(packageManifest.dependencies ?? {}).toEqual({});
   });
 
-  it("packages templates beside the installed executable", () => {
+  it("packages templates from the filtered source beside the installed executable", () => {
+    expect(flake).toContain("projectSource = nixpkgs.lib.cleanSourceWith");
+    expect(flake).toContain('".devenv"');
+    expect(flake).toContain("src = projectSource;");
     expect(flake).toContain('mkdir -p "$out/share/devenv-agents/templates"');
-    expect(flake).toContain('cp -R ${./templates}/. "$out/share/devenv-agents/templates/"');
+    expect(flake).toContain('cp -R ./templates/. "$out/share/devenv-agents/templates/"');
     expect(flake).toContain('--set PROJECT_TEMPLATE_ROOT "$out/share/devenv-agents/templates"');
   });
 
