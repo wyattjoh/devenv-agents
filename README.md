@@ -1,6 +1,52 @@
 # devenv-agents
 
-Project lifecycle tooling for devenv and Herdr worktrees.
+Project lifecycle tooling for [devenv](https://devenv.sh/) projects and
+[Herdr](https://github.com/wyattjoh/herdr) worktrees.
+
+`devenv-agents` provides the `project` command and a Herdr plugin. Together they
+create project checkouts, bootstrap linked worktrees, keep declared references
+in sync, refresh development environments, and clean up stale worktrees.
+
+## Installation
+
+The recommended installation uses Nix with flakes enabled:
+
+```sh
+nix profile install github:wyattjoh/devenv-agents
+```
+
+Verify that the command is available:
+
+```sh
+project --help
+```
+
+To integrate managed worktrees with Herdr, install the included plugin:
+
+```sh
+project plugin install
+```
+
+The packaged command includes the plugin, project templates, and `direnv`. It
+expects `devenv` and Git to be available in the environment where projects are
+managed.
+
+## Usage
+
+Add an existing repository and prepare its development environment:
+
+```sh
+project add git@github.com:owner/repository.git
+```
+
+Create and bootstrap a linked worktree:
+
+```sh
+project wt create feature/my-change
+```
+
+Run `project --help` to see the complete command list, including project
+updates, reference synchronization, worktree adoption, and garbage collection.
 
 ## Development
 
