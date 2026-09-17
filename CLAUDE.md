@@ -48,9 +48,19 @@ an interactive nested `devenv shell`. The packaged `project` wrapper supplies
 `direnv` before entering devenv; source runs via `bun src/cli.ts` require both
 `direnv` and `devenv` on the host `PATH`.
 
+The module also defines `enterTest`, so `devenv test` asserts the invariants
+every consumer depends on: the `AGENTS_*` variables, the per-language state
+directories under `.devenv/state`, the fixed `PATH` prefix order, the tools the
+module puts on `PATH`, and the Linux host-layer config paths. Keep these
+assertions consumer-agnostic. Fixture-specific behavior -- scoped services, the
+direnv prompt cycle, and Darwin's caller-preserved config paths -- belongs in
+`tests/module-shell.test.sh`, which supplies its own two-checkout fixture. On
+devenv 2.x the `devenv:enterTest` task carries no command and the `enterTest`
+string is what actually runs; a non-zero exit there fails `devenv test`.
+
 ## Commands
 
-Install development tools and lock them locally with `bun install`, then run:
+Install development tools with `bun install --frozen-lockfile`, then run:
 
 ```sh
 bun install --frozen-lockfile
@@ -67,13 +77,25 @@ nix build .#herdr-plugin
 
 `bun run project -- --help` and `bun run project -- --version` execute the
 source entrypoint. The Nix build creates the standalone `project` binary but it
-is not run by the test suite. Pull requests run the Bun gates above and the
-cross-platform template matrix. Dependabot groups weekly patch and minor Bun
-updates, keeps Bun majors separate, and groups GitHub Actions updates. Keep
-`bun.lock` at lockfile version 0 until Dependabot supports version 2; both
-Dependabot's Bun 1.1.39 and current Bun releases can read version 0. A weekly
-Actions workflow opens
-the Nix lockfile pull request; because it uses
+is not run by the test suite, but CI builds `.#herdr-plugin` directly and
+reaches `.#project` through the template matrix, which reuses it as the `agents`
+input. Pull requests run the Bun gates above and the cross-platform template
+matrix, where each template runs `devenv test` so the module's `enterTest`
+assertions cover both Linux and macOS. Dependabot groups weekly patch and minor Bun
+updates, keeps Bun majors separate, and groups GitHub Actions updates.
+
+Let Dependabot own `bun.lock`. It runs Bun 1.1.39, which reads only lockfile
+version 0, while Bun 1.4 and later always rewrite the file to version 1 with a
+`configVersion` key and nested dependency entries, and expose no flag to pin the
+version. Any lockfile-writing Bun command run locally -- including a bare
+`bun install`, not just `bun add` and `bun update` -- therefore breaks
+Dependabot's parser and silently stops its Bun pull requests. Always pass
+`--frozen-lockfile`, which installs without touching the file. Upgrading a Bun
+dependency by hand means accepting version 1 and retiring the `bun` ecosystem
+from `.github/dependabot.yml`; make that a deliberate change, not a side effect
+of running the wrong command.
+
+A weekly Actions workflow opens the Nix lockfile pull request; because it uses
 `GITHUB_TOKEN`, its pull-request checks require manual workflow approval.
 
 GitHub Actions must be pinned to full commit SHAs with their release tags in
