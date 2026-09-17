@@ -48,6 +48,16 @@ an interactive nested `devenv shell`. The packaged `project` wrapper supplies
 `direnv` before entering devenv; source runs via `bun src/cli.ts` require both
 `direnv` and `devenv` on the host `PATH`.
 
+The module also defines `enterTest`, so `devenv test` asserts the invariants
+every consumer depends on: the `AGENTS_*` variables, the per-language state
+directories under `.devenv/state`, the fixed `PATH` prefix order, the tools the
+module puts on `PATH`, and the Linux host-layer config paths. Keep these
+assertions consumer-agnostic. Fixture-specific behavior -- scoped services, the
+direnv prompt cycle, and Darwin's caller-preserved config paths -- belongs in
+`tests/module-shell.test.sh`, which supplies its own two-checkout fixture. On
+devenv 2.x the `devenv:enterTest` task carries no command and the `enterTest`
+string is what actually runs; a non-zero exit there fails `devenv test`.
+
 ## Commands
 
 Install development tools and lock them locally with `bun install`, then run:
@@ -67,8 +77,11 @@ nix build .#herdr-plugin
 
 `bun run project -- --help` and `bun run project -- --version` execute the
 source entrypoint. The Nix build creates the standalone `project` binary but it
-is not run by the test suite. Pull requests run the Bun gates above and the
-cross-platform template matrix. Dependabot groups weekly patch and minor Bun
+is not run by the test suite, but CI builds `.#herdr-plugin` directly and
+reaches `.#project` through the template matrix, which reuses it as the `agents`
+input. Pull requests run the Bun gates above and the cross-platform template
+matrix, where each template runs `devenv test` so the module's `enterTest`
+assertions cover both Linux and macOS. Dependabot groups weekly patch and minor Bun
 updates, keeps Bun majors separate, and groups GitHub Actions updates. Keep
 `bun.lock` at lockfile version 0 until Dependabot supports version 2; both
 Dependabot's Bun 1.1.39 and current Bun releases can read version 0. A weekly

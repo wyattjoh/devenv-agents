@@ -63,6 +63,6 @@ jobs:
             agents:
               url: path:../..
           EOF
-      - name: Evaluate template
+      - name: Evaluate template and assert module invariants
         working-directory: templates/${{ matrix.template }}
-        run: devenv shell -- true
+        run: devenv test

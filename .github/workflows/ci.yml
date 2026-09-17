@@ -36,3 +36,5 @@ jobs:
         run: bun run format:check
       - name: Build
         run: bun run build
+      - name: Build the Herdr plugin package
+        run: nix build .#herdr-plugin
