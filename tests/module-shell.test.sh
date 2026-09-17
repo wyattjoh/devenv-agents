@@ -75,6 +75,12 @@ pi_path="$(direnv exec "$worktree" bash -c 'command -v pi')"
 assert_equal "direnv Pi path" "$DEVENV_DOTFILE/profile/bin/pi" "$pi_path"
 status_line_path="$(direnv exec "$worktree" bash -c 'command -v claude-status-line')"
 assert_equal "direnv status line path" "$DEVENV_DOTFILE/profile/bin/claude-status-line" "$status_line_path"
+# The Herdr Claude integration hook execs python3. Without it the hook exits
+# silently and a running Claude is never reported as an agent.
+if ! direnv exec "$worktree" bash -c 'command -v python3 >/dev/null'; then
+  printf 'python3 must resolve through direnv exec\n' >&2
+  exit 1
+fi
 
 # Exercise the hook in this same long-lived Bash process, rather than checking
 # an exported function in a child shell. A prompt cycle must load the .envrc

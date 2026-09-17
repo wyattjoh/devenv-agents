@@ -519,11 +519,16 @@ const registerProject = (project: ProjectRegistration, options: ProjectAddOption
     ["--user", "daemon-reload"],
     { cwd: project.path, env: undefined },
   );
+  // Deliberately `start`, not `enable`. On NixOS `systemctl --user enable`
+  // resolves the template to its realpath and materializes a symlink into the
+  // Nix store, freezing the unit at whatever revision existed when the project
+  // was added; later host deploys then never reach the running server. The host
+  // owns the boot-time want declaratively instead.
   runRequiredCommand(
     options.runner,
-    `systemctl --user enable --now herdr@${project.session}`,
+    `systemctl --user start herdr@${project.session}`,
     "systemctl",
-    ["--user", "enable", "--now", `herdr@${project.session}`],
+    ["--user", "start", `herdr@${project.session}`],
     { cwd: project.path, env: undefined },
   );
 
