@@ -96,7 +96,18 @@ from `.github/dependabot.yml`; make that a deliberate change, not a side effect
 of running the wrong command.
 
 A weekly Actions workflow opens the Nix lockfile pull request; because it uses
-`GITHUB_TOKEN`, its pull-request checks require manual workflow approval.
+`GITHUB_TOKEN`, its pull-request checks require manual workflow approval. That
+approval is now load-bearing: `main` carries a branch ruleset requiring the
+`Bun` check and all eight template cells, so an unapproved run leaves the
+lockfile pull request unmergeable rather than merely unchecked.
+
+The ruleset lives in repository settings, not in this tree -- GitHub has no
+in-repo format for branch protection. It requires a pull request with zero
+approvals, since a solo repository cannot approve its own, and blocks branch
+deletion and force pushes. The repository owner is the only bypass actor, so
+direct pushes to `main` remain possible when a change does not warrant a pull
+request. Renaming a CI job breaks the required-check contexts, which are matched
+by name; update the ruleset in the same change.
 
 GitHub Actions must be pinned to full commit SHAs with their release tags in
 same-line comments so Dependabot can update both safely. The template workflow
