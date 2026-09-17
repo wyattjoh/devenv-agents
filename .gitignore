@@ -6,3 +6,5 @@ result
 result-*
 .direnv/
 .devenv/
+templates/*/devenv.lock
+templates/*/devenv.local.yaml
