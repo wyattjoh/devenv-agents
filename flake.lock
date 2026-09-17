@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "claude-status-line": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1788553033,
+        "narHash": "sha256-l6aWPKTiZW+ZSDJZ/OhO8N8sst/15GitKxSrGAUeYp8=",
+        "owner": "wyattjoh",
+        "repo": "claude-status-line",
+        "rev": "370f4ccbcdbe3ebe6dd9ce6ed2a8941f95f9c362",
+        "type": "github"
+      },
+      "original": {
+        "owner": "wyattjoh",
+        "repo": "claude-status-line",
+        "rev": "370f4ccbcdbe3ebe6dd9ce6ed2a8941f95f9c362",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1789370336,
@@ -18,6 +35,7 @@
     },
     "root": {
       "inputs": {
+        "claude-status-line": "claude-status-line",
         "nixpkgs": "nixpkgs"
       }
     }

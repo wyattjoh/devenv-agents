@@ -69,6 +69,12 @@ if ! declare -F _direnv_hook >/dev/null; then
 fi
 claude_path="$(direnv exec "$worktree" bash -c 'command -v claude')"
 assert_equal "direnv Claude Code path" "$DEVENV_DOTFILE/profile/bin/claude" "$claude_path"
+# Pi and the status line come from the shared module too, so a consumer that
+# declares neither still resolves both out of the project profile.
+pi_path="$(direnv exec "$worktree" bash -c 'command -v pi')"
+assert_equal "direnv Pi path" "$DEVENV_DOTFILE/profile/bin/pi" "$pi_path"
+status_line_path="$(direnv exec "$worktree" bash -c 'command -v claude-status-line')"
+assert_equal "direnv status line path" "$DEVENV_DOTFILE/profile/bin/claude-status-line" "$status_line_path"
 
 # Exercise the hook in this same long-lived Bash process, rather than checking
 # an exported function in a child shell. A prompt cycle must load the .envrc

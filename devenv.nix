@@ -10,7 +10,9 @@ let
       { };
   scoped = declaration.services.scoped or [ ];
   homeDirectory = builtins.getEnv "HOME";
-  project = inputs.agents.packages.${pkgs.stdenv.hostPlatform.system}.project;
+  agentsPackages = inputs.agents.packages.${pkgs.stdenv.hostPlatform.system};
+  project = agentsPackages.project;
+  claudeStatusLine = agentsPackages."claude-status-line";
 in
 {
   options.agents.session = lib.mkOption {
@@ -20,7 +22,19 @@ in
 
   config = lib.mkMerge [
     {
-      packages = [ project pkgs.git pkgs.just pkgs.gh pkgs.claude-code pkgs.direnv ];
+      # Claude Code, Pi, and the status line are agent tooling every project
+      # gets from here rather than defining again. Pi tracks the consumer's
+      # nixpkgs; a version bump is a nixpkgs bump, not an edit in each repo.
+      packages = [
+        project
+        pkgs.git
+        pkgs.just
+        pkgs.gh
+        pkgs.claude-code
+        pkgs.pi-coding-agent
+        claudeStatusLine
+        pkgs.direnv
+      ];
       env.AGENTS_SESSION = config.agents.session;
       env.DISABLE_AUTOUPDATER = "1";
       env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = "1";
