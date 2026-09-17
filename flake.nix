@@ -2,9 +2,16 @@
   description = "devenv-agents project CLI and Herdr plugin";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  # The status line is a Deno program with no flake of its own. Take the source
+  # here and wrap it below so every consumer of this flake resolves the same
+  # pinned revision instead of packaging it again.
+  inputs.claude-status-line = {
+    url = "github:wyattjoh/claude-status-line/370f4ccbcdbe3ebe6dd9ce6ed2a8941f95f9c362";
+    flake = false;
+  };
 
   outputs =
-    { self, nixpkgs }:
+    { self, nixpkgs, claude-status-line }:
     let
       systems = [
         "aarch64-darwin"
@@ -32,6 +39,21 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
+          claudeStatusLine = pkgs.writeShellApplication {
+            name = "claude-status-line";
+            runtimeInputs = [ pkgs.deno ];
+            text = ''
+              exec deno run \
+                --allow-net \
+                --allow-env \
+                --allow-read \
+                --allow-write \
+                --allow-run \
+                --allow-sys \
+                --unstable-kv \
+                ${claude-status-line}/src/main.ts "$@"
+            '';
+          };
           herdrPlugin = pkgs.runCommand "devenv-agents-herdr-plugin" { } ''
             mkdir -p "$out"
             cp -R ${./plugin}/. "$out/"
@@ -71,7 +93,8 @@
           };
         in
         {
-          inherit herdrPlugin project;
+          inherit claudeStatusLine herdrPlugin project;
+          "claude-status-line" = claudeStatusLine;
           "herdr-plugin" = herdrPlugin;
           default = project;
         }

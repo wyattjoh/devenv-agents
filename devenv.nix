@@ -10,7 +10,9 @@ let
       { };
   scoped = declaration.services.scoped or [ ];
   homeDirectory = builtins.getEnv "HOME";
-  project = inputs.agents.packages.${pkgs.stdenv.hostPlatform.system}.project;
+  agentsPackages = inputs.agents.packages.${pkgs.stdenv.hostPlatform.system};
+  project = agentsPackages.project;
+  claudeStatusLine = agentsPackages."claude-status-line";
 in
 {
   options.agents.session = lib.mkOption {
@@ -20,7 +22,25 @@ in
 
   config = lib.mkMerge [
     {
-      packages = [ project pkgs.git pkgs.just pkgs.gh pkgs.claude-code pkgs.direnv ];
+      # Claude Code, Pi, and the status line are agent tooling every project
+      # gets from here rather than defining again. Pi tracks the consumer's
+      # nixpkgs; a version bump is a nixpkgs bump, not an edit in each repo.
+      # Claude Code comes from nixpkgs rather than the native self-updating
+      # installer: that installer ships a generic dynamically-linked binary,
+      # which NixOS cannot execute without nix-ld. python3 is required by
+      # Herdr's Claude integration hook, which exits silently without it and
+      # leaves a running agent undetected.
+      packages = [
+        project
+        pkgs.git
+        pkgs.just
+        pkgs.gh
+        pkgs.claude-code
+        pkgs.pi-coding-agent
+        claudeStatusLine
+        pkgs.direnv
+        pkgs.python3
+      ];
       env.AGENTS_SESSION = config.agents.session;
       env.DISABLE_AUTOUPDATER = "1";
       env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = "1";
@@ -46,7 +66,9 @@ in
         export DENO_DIR="$AGENTS_PROJECT_STATE/deno"
         mkdir -p "$RUSTUP_HOME" "$CARGO_HOME" "$NPM_CONFIG_PREFIX" "$NPM_CONFIG_CACHE" "$BUN_INSTALL" "$DENO_DIR"
         # Keep this stable path first so rebuilt profiles reach running processes.
-        export PATH="$DEVENV_DOTFILE/profile/bin:$CARGO_HOME/bin:$NPM_CONFIG_PREFIX/bin:$BUN_INSTALL/bin:$PATH"
+        # ~/.local/bin trails the caller's PATH so the self-updating native CLIs
+        # stay reachable without ever displacing the project profile.
+        export PATH="$DEVENV_DOTFILE/profile/bin:$CARGO_HOME/bin:$NPM_CONFIG_PREFIX/bin:$BUN_INSTALL/bin:$PATH:$HOME/.local/bin"
         [ -f "$AGENTS_PROJECT_STATE/references.env" ] && . "$AGENTS_PROJECT_STATE/references.env"
       '';
 
@@ -111,7 +133,17 @@ in
         assert_equal PATH[2] "$NPM_CONFIG_PREFIX/bin" "$path_npm"
         assert_equal PATH[3] "$BUN_INSTALL/bin" "$path_bun"
 
-        for tool in project git just gh claude direnv; do
+        # Native CLIs (claude, herdr) install into ~/.local/bin. Keep it
+        # reachable without displacing the stable profile entries above.
+        case ":$PATH:" in
+          *":$HOME/.local/bin:"*) ;;
+          *)
+            printf '%s/.local/bin must be on PATH\n' "$HOME" >&2
+            exit 1
+            ;;
+        esac
+
+        for tool in project git just gh claude pi claude-status-line python3 direnv; do
           if ! command -v "$tool" >/dev/null; then
             printf 'module must provide %s on PATH\n' "$tool" >&2
             exit 1
