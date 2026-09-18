@@ -42,7 +42,9 @@ It is also the single definition of the agent tooling every project shares:
 the Claude Code CLI, Pi, and the `claude-status-line` wrapper this flake builds
 from a pinned `claude-status-line` source input. Consumers declare none of the
 three. Pi comes from the consumer's nixpkgs, so upgrading it is a nixpkgs bump
-rather than an edit in each project. It also provides `python3`, which Herdr's
+rather than an edit in each project. nixpkgs has no `x86_64-darwin` build of
+Pi, so the module includes it only where `lib.meta.availableOn` says it exists
+and omits it elsewhere rather than failing to evaluate. It also provides `python3`, which Herdr's
 Claude integration hook execs; without it the hook exits silently and a running
 Claude is never reported as an agent. Because Claude Code is an unfree nixpkgs
 package, consumers must set `allowUnfree: true` in `devenv.yaml`. Claude Code
