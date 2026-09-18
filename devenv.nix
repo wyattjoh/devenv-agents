@@ -13,6 +13,20 @@ let
   agentsPackages = inputs.agents.packages.${pkgs.stdenv.hostPlatform.system};
   project = agentsPackages.project;
   claudeStatusLine = agentsPackages."claude-status-line";
+  # nixpkgs builds Pi for Linux and aarch64-darwin but not x86_64-darwin. Ask
+  # whether this platform is one of them rather than asserting it is, so the
+  # module still evaluates where Pi was never packaged.
+  piAvailable = lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.pi-coding-agent;
+  sharedTools = [
+    "project"
+    "git"
+    "just"
+    "gh"
+    "claude"
+    "claude-status-line"
+    "python3"
+    "direnv"
+  ] ++ lib.optional piAvailable "pi";
 in
 {
   options.agents.session = lib.mkOption {
@@ -36,11 +50,10 @@ in
         pkgs.just
         pkgs.gh
         pkgs.claude-code
-        pkgs.pi-coding-agent
         claudeStatusLine
         pkgs.direnv
         pkgs.python3
-      ];
+      ] ++ lib.optional piAvailable pkgs.pi-coding-agent;
       env.AGENTS_SESSION = config.agents.session;
       env.DISABLE_AUTOUPDATER = "1";
       env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = "1";
@@ -143,7 +156,7 @@ in
             ;;
         esac
 
-        for tool in project git just gh claude pi claude-status-line python3 direnv; do
+        for tool in ${lib.concatStringsSep " " sharedTools}; do
           if ! command -v "$tool" >/dev/null; then
             printf 'module must provide %s on PATH\n' "$tool" >&2
             exit 1
