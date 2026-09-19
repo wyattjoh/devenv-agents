@@ -27,6 +27,7 @@ src/testing/git-fixture.ts # temporary repository and linked-worktree helper
 tests/module-shell.test.sh # shell assertions for the worktree environment
 fixtures/                  # captured Herdr protocol responses
 plugin/                    # packaged Herdr plugin directory
+skills/devenv-agents/      # consumer integration skill and reference guides
 flake.nix                  # Nix packages for project and herdr-plugin
 ```
 

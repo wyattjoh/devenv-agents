@@ -48,6 +48,24 @@ project wt create feature/my-change
 Run `project --help` to see the complete command list, including project
 updates, reference synchronization, worktree adoption, and garbage collection.
 
+## Agent skill
+
+The repository includes an Agent Skills-compatible integration guide at
+`skills/devenv-agents`. Load it from the repository root when starting Pi:
+
+```sh
+pi --skill skills/devenv-agents
+```
+
+Then invoke it directly or ask Pi to add devenv-agents support to a project:
+
+```text
+/skill:devenv-agents integrate this devenv project
+```
+
+The skill preserves an existing devenv configuration while adding the shared
+module, direnv activation, optional project declarations, and verification.
+
 ## Development
 
 Install the locked Bun dependencies and repository-owned Git hooks:
