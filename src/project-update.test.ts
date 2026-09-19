@@ -6,6 +6,7 @@ import { runCli } from "./cli.ts";
 import { captureOutput, createCliDependencies } from "./testing/cli.ts";
 import { writeProjectsFile } from "./project-add.ts";
 import { formatProjectUpdate, runProjectUpdate } from "./project-update.ts";
+import type { SyncReferences } from "./project-sync.ts";
 import { createGitFixture } from "./testing/git-fixture.ts";
 import {
   createRecordingRunner,
@@ -24,6 +25,8 @@ const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
   stdout,
   stderr,
 });
+
+const noSync: SyncReferences = () => undefined;
 
 const gitResponse = (invocation: CommandInvocation): CommandResult =>
   spawnGit(invocation.args, { cwd: invocation.cwd, env: invocation.env });
@@ -75,7 +78,17 @@ describe("project update", () => {
       "devenv shell -- true": [result(0), result(1, "", "branch lock drift"), result(0)],
     });
 
-    const update = runProjectUpdate({ projectPath: fixture.worktree, runner });
+    const synchronizedWorktrees: string[] = [];
+
+    const syncReferences: SyncReferences = ({ worktreePath }) => {
+      synchronizedWorktrees.push(worktreePath);
+    };
+
+    const update = runProjectUpdate({
+      projectPath: fixture.worktree,
+      runner,
+      syncReferences,
+    });
 
     expect(update.exitCode).toBe(1);
     expect(update.items).toEqual([
@@ -107,6 +120,7 @@ describe("project update", () => {
     expect(formatProjectUpdate(update)).toContain(
       `Worktree (${worktrees[0]}): failed: devenv shell -- true`,
     );
+    expect(synchronizedWorktrees).toEqual([mainCheckout, worktrees[1]]);
     expect(
       runner.calls
         .filter((call) => call.command === "devenv" || call.command === "direnv")
@@ -120,6 +134,46 @@ describe("project update", () => {
       ["direnv", "allow"],
       ["devenv", "shell", "--", "true"],
     ]);
+  });
+
+  it("captures a reference sync failure while continuing later worktrees", () => {
+    const fixture = createFixture("devenv-agents-update-sync-failure-");
+    created.push(fixture.root);
+    const mainCheckout = realpathSync(fixture.repository);
+    const worktreePath = realpathSync(fixture.worktree);
+    const synchronizedWorktrees: string[] = [];
+
+    const syncReferences: SyncReferences = ({ worktreePath: path }) => {
+      synchronizedWorktrees.push(path);
+
+      if (path === mainCheckout) throw new Error("reference sync failed");
+    };
+
+    const runner = gitRunner({
+      "devenv update agents": result(0),
+      "devenv shell -- true": result(0),
+    });
+
+    const update = runProjectUpdate({
+      projectPath: fixture.repository,
+      runner,
+      syncReferences,
+    });
+
+    expect(update.exitCode).toBe(1);
+    expect(update.items[1]).toEqual({
+      kind: "main",
+      path: mainCheckout,
+      success: false,
+      error: "reference sync failed",
+    });
+    expect(update.items[2]).toEqual({
+      kind: "worktree",
+      path: worktreePath,
+      success: true,
+      error: undefined,
+    });
+    expect(synchronizedWorktrees).toEqual([mainCheckout, worktreePath]);
   });
 
   it("updates a deleted linked worktree from a symlinked project path", () => {
@@ -138,7 +192,11 @@ describe("project update", () => {
       "devenv shell -- true": result(0),
     });
 
-    const update = runProjectUpdate({ projectPath: symlinkedRoot, runner });
+    const update = runProjectUpdate({
+      projectPath: symlinkedRoot,
+      runner,
+      syncReferences: noSync,
+    });
 
     expect(update.mainCheckout).toBe(mainCheckout);
     expect(update.items).toEqual([
@@ -157,7 +215,11 @@ describe("project update", () => {
       "devenv shell -- true": result(0),
     });
 
-    const update = runProjectUpdate({ projectPath: fixture.repository, runner });
+    const update = runProjectUpdate({
+      projectPath: fixture.repository,
+      runner,
+      syncReferences: noSync,
+    });
 
     expect(update.exitCode).toBe(1);
     expect(update.items[0]).toEqual({
@@ -188,7 +250,11 @@ describe("project update", () => {
       "devenv shell -- true": result(0),
     });
 
-    const update = runProjectUpdate({ projectPath: fixture.repository, runner });
+    const update = runProjectUpdate({
+      projectPath: fixture.repository,
+      runner,
+      syncReferences: noSync,
+    });
 
     expect(update.exitCode).toBe(1);
     expect(update.items.at(-1)).toEqual({

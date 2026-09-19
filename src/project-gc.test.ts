@@ -338,7 +338,12 @@ describe("project gc", () => {
       runner,
     });
 
-    const update = runProjectUpdate({ projectPath: symlinkedMain, runner });
+    const update = runProjectUpdate({
+      projectPath: symlinkedMain,
+      runner,
+      syncReferences: () => undefined,
+    });
+
     const missingPath = resolveMissing(project.missing);
 
     expect(gc.mainCheckout).toBe(realpathSync(project.main));

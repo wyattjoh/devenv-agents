@@ -1,4 +1,6 @@
 import { errorMessage, runRequiredCommand, type CommandRunner } from "./command-runner.ts";
+import { readProjectDeclaration } from "./project-declaration.ts";
+import type { SyncReferences } from "./project-sync.ts";
 import { listLinkedWorktrees, resolveMainCheckout, type WorkspaceWorktree } from "./workspace.ts";
 import { warmWorktree } from "./worktree-bootstrap.ts";
 
@@ -32,6 +34,7 @@ export type ProjectUpdateResult = {
 type ProjectUpdateOptions = {
   readonly projectPath: string;
   readonly runner: CommandRunner;
+  readonly syncReferences: SyncReferences;
 };
 
 const runDevenv = (
@@ -51,7 +54,7 @@ const runDevenv = (
 };
 
 const runWarmup = (
-  runner: CommandRunner,
+  options: ProjectUpdateOptions,
   kind: "main" | "worktree",
   mainCheckout: string,
   worktreePath: string,
@@ -60,9 +63,14 @@ const runWarmup = (
     warmWorktree({
       mainCheckout,
       worktreePath,
-      runner,
+      runner: options.runner,
       devenvTemplate: undefined,
       missingDevenvError: undefined,
+    });
+    options.syncReferences({
+      projectRoot: mainCheckout,
+      worktreePath,
+      declaration: readProjectDeclaration(mainCheckout),
     });
 
     return { kind, path: worktreePath, success: true, error: undefined };
@@ -72,11 +80,11 @@ const runWarmup = (
 };
 
 /**
- * Updates the agents input and rebuilds a project's main checkout and every
- * linked Git worktree. A failed step is captured and does not stop later
- * worktrees from being attempted.
+ * Updates the agents input, then rebuilds and synchronizes a project's main
+ * checkout and every linked Git worktree. A failed step is captured and does
+ * not stop later worktrees from being attempted.
  *
- * @param options Project path and injected command runner.
+ * @param options Project path, command runner, and reference sync seam.
  * @returns Ordered step results and a non-zero exit code when any step failed.
  */
 export const runProjectUpdate = (options: ProjectUpdateOptions): ProjectUpdateResult => {
@@ -92,7 +100,7 @@ export const runProjectUpdate = (options: ProjectUpdateOptions): ProjectUpdateRe
     ),
   );
 
-  items.push(runWarmup(options.runner, "main", mainCheckout, mainCheckout));
+  items.push(runWarmup(options, "main", mainCheckout, mainCheckout));
 
   let worktrees: readonly WorkspaceWorktree[];
 
@@ -110,7 +118,7 @@ export const runProjectUpdate = (options: ProjectUpdateOptions): ProjectUpdateRe
   }
 
   for (const worktree of worktrees) {
-    items.push(runWarmup(options.runner, "worktree", mainCheckout, worktree.path));
+    items.push(runWarmup(options, "worktree", mainCheckout, worktree.path));
   }
 
   return {

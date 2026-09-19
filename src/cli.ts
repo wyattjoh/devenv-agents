@@ -498,6 +498,7 @@ const runProjectUpdateCommand = (
   const result = runProjectUpdate({
     projectPath: context.projectPath,
     runner: context.dependencies.runner,
+    syncReferences: context.dependencies.syncReferences,
   });
 
   return commandExecution(result, result.exitCode);
