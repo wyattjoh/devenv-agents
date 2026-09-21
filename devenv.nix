@@ -1,8 +1,12 @@
 { inputs, pkgs, lib, config, ... }:
 let
   root = toString config.devenv.root;
-  # A linked worktree has a `.git` file, while the main checkout has `.git/config`.
-  isWorktree = !(builtins.pathExists "${root}/.git/config");
+  # Three root shapes. A main checkout has `.git/config`; a linked worktree has
+  # `.git` as a file; a tree root -- a directory holding several checkouts,
+  # with the environment above all of them -- has no `.git` at all. Only the
+  # middle one is a worktree, so scoped services still run from a tree root.
+  isCheckout = builtins.pathExists "${root}/.git";
+  isWorktree = isCheckout && !(builtins.pathExists "${root}/.git/config");
   declaration =
     if builtins.pathExists "${root}/.agents/project.toml" then
       builtins.fromTOML (builtins.readFile "${root}/.agents/project.toml")
@@ -27,6 +31,19 @@ let
     "python3"
     "direnv"
   ] ++ lib.optional piAvailable "pi";
+  # Resolves `root` and `main` identically for enterShell and enterTest, so the
+  # two can never disagree about where project state lives. `git -C "$root"`
+  # rather than a bare `git`: the answer must come from the devenv root, not
+  # from whatever directory the caller happened to be in. A tree root is not a
+  # checkout, so it owns its state directly.
+  resolveProjectRoot = ''
+    root="$(cd "$DEVENV_ROOT" && pwd -P)"
+    if common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+      main="$(dirname "$common")"
+    else
+      main="$root"
+    fi
+  '';
 in
 {
   options.agents.session = lib.mkOption {
@@ -61,9 +78,7 @@ in
       enterShell = ''
         # Install direnv's hook in the long-lived Bash process entered by devenv.
         eval "$(direnv hook bash)"
-        common="$(git rev-parse --path-format=absolute --git-common-dir)"
-        main="$(dirname "$common")"
-        root="$(cd "$DEVENV_ROOT" && pwd -P)"
+        ${resolveProjectRoot}
         export AGENTS_PROJECT_ROOT="$main"
         export AGENTS_PROJECT_STATE="$main/.devenv/state"
         if [ "$main" = "$root" ]; then
@@ -98,9 +113,7 @@ in
           fi
         }
 
-        common="$(git rev-parse --path-format=absolute --git-common-dir)"
-        main="$(dirname "$common")"
-        root="$(cd "$DEVENV_ROOT" && pwd -P)"
+        ${resolveProjectRoot}
         state="$main/.devenv/state"
 
         assert_equal AGENTS_PROJECT_ROOT "$main" "$AGENTS_PROJECT_ROOT"
@@ -114,7 +127,14 @@ in
           exit 1
         fi
 
-        # A linked worktree names itself; the main checkout leaves it unset.
+        # A root that is not a checkout at all owns its state directly, so the
+        # nested repositories under it share one environment and one cache.
+        if ! git -C "$root" rev-parse --git-dir >/dev/null 2>&1; then
+          assert_equal "tree root AGENTS_PROJECT_ROOT" "$root" "$AGENTS_PROJECT_ROOT"
+        fi
+
+        # A linked worktree names itself; a main checkout or tree root leaves
+        # it unset.
         if [ "$main" = "$root" ]; then
           if [ "''${AGENTS_WORKTREE+x}" = x ]; then
             printf 'AGENTS_WORKTREE must be unset in the main checkout\n' >&2
