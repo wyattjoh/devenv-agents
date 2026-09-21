@@ -25,9 +25,9 @@ The module defines:
 | Variable                                       | Meaning                                                                         |
 | ---------------------------------------------- | ------------------------------------------------------------------------------- |
 | `AGENTS_SESSION`                               | Explicit `agents.session`, `.agents/project.toml` session, or checkout basename |
-| `AGENTS_PROJECT_ROOT`                          | Canonical main checkout containing the common Git directory                     |
-| `AGENTS_PROJECT_STATE`                         | Main checkout's `.devenv/state` directory                                       |
-| `AGENTS_WORKTREE`                              | Linked-worktree basename; unset in the main checkout                            |
+| `AGENTS_PROJECT_ROOT`                          | Main checkout owning the common Git directory, or the tree root                 |
+| `AGENTS_PROJECT_STATE`                         | `AGENTS_PROJECT_ROOT`'s `.devenv/state` directory                               |
+| `AGENTS_WORKTREE`                              | Linked-worktree basename; unset in a main checkout or tree root                 |
 | `RUSTUP_HOME`                                  | `$AGENTS_PROJECT_STATE/rustup`                                                  |
 | `CARGO_HOME`                                   | `$AGENTS_PROJECT_STATE/cargo`                                                   |
 | `NPM_CONFIG_PREFIX`                            | `$AGENTS_PROJECT_STATE/npm`                                                     |
@@ -51,6 +51,31 @@ PI_CODING_AGENT_DIR=$HOME/.local/share/agents/pi
 
 Darwin leaves those variables undefined so the caller's native configuration
 continues to apply.
+
+## Root shapes
+
+The module supports three shapes, told apart by what the devenv root's `.git`
+is:
+
+| Shape           | `.git`    | `AGENTS_PROJECT_ROOT` | Scoped services |
+| --------------- | --------- | --------------------- | --------------- |
+| Main checkout   | directory | the checkout          | enabled         |
+| Linked worktree | file      | the main checkout     | force-disabled  |
+| Tree root       | absent    | the tree root         | enabled         |
+
+A **tree root** is a directory that holds several checkouts with the
+environment sitting above all of them, and is not a checkout itself. direnv
+loads the nearest `.envrc` walking up, so every repository beneath a tree root
+-- and every linked worktree inside those repositories -- enters the same
+environment and shares one `.devenv/state`.
+
+That shape exists for repositories that cannot carry devenv files of their own,
+such as work repositories where committing them is not an option and excluding
+them per clone is noise. Put the environment in the directory above instead and
+nothing enters any checkout.
+
+A tree root is not a worktree: it is the single place the environment is
+entered from, so scoped services run there.
 
 ## Worktree behavior
 
@@ -87,3 +112,4 @@ with these assertions by devenv.
 - `devenv.nix` — complete module implementation and assertions
 - `flake.nix` — packaged `project` CLI and pinned status line
 - `tests/module-shell.test.sh` — main-checkout and linked-worktree integration
+- `tests/tree-root-shell.test.sh` — tree-root integration

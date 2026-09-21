@@ -25,6 +25,7 @@ src/testing/command-runner.ts # recording command runner adapter for tests
 src/testing/git-env.ts     # sanitized Git process helper for tests
 src/testing/git-fixture.ts # temporary repository and linked-worktree helper
 tests/module-shell.test.sh # shell assertions for the worktree environment
+tests/tree-root-shell.test.sh # shell assertions for the tree-root environment
 fixtures/                  # captured Herdr protocol responses
 plugin/                    # packaged Herdr plugin directory
 skills/devenv-agents/      # consumer integration skill and reference guides
@@ -70,6 +71,15 @@ direnv prompt cycle, and Darwin's caller-preserved config paths -- belongs in
 `tests/module-shell.test.sh`, which supplies its own two-checkout fixture. On
 devenv 2.x the `devenv:enterTest` task carries no command and the `enterTest`
 string is what actually runs; a non-zero exit there fails `devenv test`.
+
+The devenv root is not always a checkout. A _tree root_ -- a directory holding
+several repositories with the environment above all of them -- has no `.git`,
+so `git rev-parse --git-common-dir` fails there and the module falls back to
+`DEVENV_ROOT`. Both `enterShell` and `enterTest` resolve this through the one
+`resolveProjectRoot` snippet so they cannot disagree. A tree root is not a
+worktree; scoped services run there. `tests/tree-root-shell.test.sh` covers the
+shape, including the part that carries it: direnv walking up from a nested
+checkout that has no devenv files of its own.
 
 ## Commands
 
