@@ -9,12 +9,15 @@ The module puts these tools on `PATH`:
 
 - the packaged `project` CLI;
 - Git, GitHub CLI, and `just`;
-- Claude Code and the pinned `claude-status-line` wrapper;
+- the pinned `claude-status-line` wrapper;
 - Python 3, required by Herdr's Claude integration hook;
-- direnv;
-- Pi where nixpkgs marks `pi-coding-agent` available for the host platform.
+- direnv.
 
-It also appends `~/.local/bin` so native tools such as Herdr remain reachable.
+Claude Code and Pi are not packaged. They release too often to pin through a
+lock every consumer must bump, so they are host installs: Claude Code's
+self-updating native installer, and Pi through the host's mise. The module
+appends `~/.local/bin` so native tools such as Claude Code and Herdr remain
+reachable.
 The stable devenv profile stays first on `PATH`, followed by the shared Cargo,
 npm, and Bun bin directories.
 
@@ -34,7 +37,6 @@ The module defines:
 | `NPM_CONFIG_CACHE`                             | `$AGENTS_PROJECT_STATE/npm-cache`                                               |
 | `BUN_INSTALL`                                  | `$AGENTS_PROJECT_STATE/bun`                                                     |
 | `DENO_DIR`                                     | `$AGENTS_PROJECT_STATE/deno`                                                    |
-| `DISABLE_AUTOUPDATER`                          | `1`, keeping Nix-managed Claude Code pinned                                     |
 | `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` | `1`, enabling instructions from granted sibling trees                           |
 
 The language state directories are shared by the main checkout and its linked

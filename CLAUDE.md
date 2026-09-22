@@ -40,20 +40,18 @@ redirect a test into another repository.
 The shared `devenv.nix` module is imported by projects through an `agents`
 input. It owns the project/worktree environment layout, provides `direnv` with
 its Bash hook for in-place activation, and adds the flake's `project` package.
-It is also the single definition of the agent tooling every project shares:
-the Claude Code CLI, Pi, and the `claude-status-line` wrapper this flake builds
-from a pinned `claude-status-line` source input. Consumers declare none of the
-three. Pi comes from the consumer's nixpkgs, so upgrading it is a nixpkgs bump
-rather than an edit in each project. nixpkgs has no `x86_64-darwin` build of
-Pi, so the module includes it only where `lib.meta.availableOn` says it exists
-and omits it elsewhere rather than failing to evaluate. It also provides `python3`, which Herdr's
-Claude integration hook execs; without it the hook exits silently and a running
-Claude is never reported as an agent. Because Claude Code is an unfree nixpkgs
-package, consumers must set `allowUnfree: true` in `devenv.yaml`. Claude Code
-comes from nixpkgs rather than the native self-updating installer because that
-installer ships a generic dynamically-linked binary that NixOS cannot execute
-without `nix-ld`. Herdr stays native under `~/.local/bin`, which the module
-appends to `PATH` behind the stable project profile. Templates use the
+It also provides the `claude-status-line` wrapper this flake builds from a
+pinned `claude-status-line` source input, and `python3`, which Herdr's Claude
+integration hook execs; without it the hook exits silently and a running Claude
+is never reported as an agent. Claude Code and Pi are deliberately _not_
+packaged: both release several times a week, and pinning them through a lock
+every consumer must bump left projects days behind. They are host installs --
+Claude Code through its self-updating native installer, Pi through the host's
+mise (`npm:@earendil-works/pi-coding-agent`) -- and the module must neither set
+`DISABLE_AUTOUPDATER` nor put either tool in the profile, where it would shadow
+the host copy. On NixOS the native Claude binary needs `programs.nix-ld`.
+Claude Code and Herdr live under `~/.local/bin`, which the module appends to
+`PATH` behind the stable project profile. Templates use the
 published GitHub input over SSH; CI overlays a local relative input so the
 checkout under test is evaluated. Onboarding approves `devenv` first,
 then the committed `.envrc` (with `.direnv/` ignored) using `direnv allow`,

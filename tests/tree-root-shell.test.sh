@@ -63,8 +63,8 @@ assert_equal "nested AGENTS_PROJECT_STATE" "$state" \
   "$(direnv exec "$checkout" printenv AGENTS_PROJECT_STATE)"
 
 # Agent tooling resolves from inside the nested checkout, not only at the tree.
-claude_path="$(direnv exec "$checkout" bash -c 'command -v claude')"
-assert_equal "nested Claude Code path" "$DEVENV_DOTFILE/profile/bin/claude" "$claude_path"
+status_line_path="$(direnv exec "$checkout" bash -c 'command -v claude-status-line')"
+assert_equal "nested status line path" "$DEVENV_DOTFILE/profile/bin/claude-status-line" "$status_line_path"
 
 # The nested checkout is a repository in its own right; the shared environment
 # must not make Git resolve it as part of the tree.

@@ -17,20 +17,15 @@ let
   agentsPackages = inputs.agents.packages.${pkgs.stdenv.hostPlatform.system};
   project = agentsPackages.project;
   claudeStatusLine = agentsPackages."claude-status-line";
-  # nixpkgs builds Pi for Linux and aarch64-darwin but not x86_64-darwin. Ask
-  # whether this platform is one of them rather than asserting it is, so the
-  # module still evaluates where Pi was never packaged.
-  piAvailable = lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.pi-coding-agent;
   sharedTools = [
     "project"
     "git"
     "just"
     "gh"
-    "claude"
     "claude-status-line"
     "python3"
     "direnv"
-  ] ++ lib.optional piAvailable "pi";
+  ];
   # Resolves `root` and `main` identically for enterShell and enterTest, so the
   # two can never disagree about where project state lives. `git -C "$root"`
   # rather than a bare `git`: the answer must come from the devenv root, not
@@ -53,26 +48,25 @@ in
 
   config = lib.mkMerge [
     {
-      # Claude Code, Pi, and the status line are agent tooling every project
-      # gets from here rather than defining again. Pi tracks the consumer's
-      # nixpkgs; a version bump is a nixpkgs bump, not an edit in each repo.
-      # Claude Code comes from nixpkgs rather than the native self-updating
-      # installer: that installer ships a generic dynamically-linked binary,
-      # which NixOS cannot execute without nix-ld. python3 is required by
-      # Herdr's Claude integration hook, which exits silently without it and
-      # leaves a running agent undetected.
+      # Claude Code and Pi are deliberately not packaged here. Both release
+      # several times a week, and pinning them through a lock file every
+      # consumer must bump left each project days behind. They are host
+      # installs instead -- Claude Code's self-updating native installer, Pi
+      # through the host's mise -- reached through ~/.local/bin and the caller's
+      # PATH. On NixOS the native Claude binary needs programs.nix-ld. The
+      # status line stays: it is pinned tooling, not the agent itself. python3
+      # is required by Herdr's Claude integration hook, which exits silently
+      # without it and leaves a running agent undetected.
       packages = [
         project
         pkgs.git
         pkgs.just
         pkgs.gh
-        pkgs.claude-code
         claudeStatusLine
         pkgs.direnv
         pkgs.python3
-      ] ++ lib.optional piAvailable pkgs.pi-coding-agent;
+      ];
       env.AGENTS_SESSION = config.agents.session;
-      env.DISABLE_AUTOUPDATER = "1";
       env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = "1";
 
       enterShell = ''
@@ -118,7 +112,6 @@ in
 
         assert_equal AGENTS_PROJECT_ROOT "$main" "$AGENTS_PROJECT_ROOT"
         assert_equal AGENTS_PROJECT_STATE "$state" "$AGENTS_PROJECT_STATE"
-        assert_equal DISABLE_AUTOUPDATER 1 "$DISABLE_AUTOUPDATER"
         assert_equal CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD 1 \
           "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"
 

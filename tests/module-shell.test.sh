@@ -55,7 +55,6 @@ assert_equal NPM_CONFIG_PREFIX "$state/npm" "$NPM_CONFIG_PREFIX"
 assert_equal NPM_CONFIG_CACHE "$state/npm-cache" "$NPM_CONFIG_CACHE"
 assert_equal BUN_INSTALL "$state/bun" "$BUN_INSTALL"
 assert_equal DENO_DIR "$state/deno" "$DENO_DIR"
-assert_equal DISABLE_AUTOUPDATER "1" "$DISABLE_AUTOUPDATER"
 assert_equal CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD "1" "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"
 assert_equal TEST_SCOPED_SERVICE "disabled" "$TEST_SCOPED_SERVICE"
 
@@ -67,12 +66,16 @@ if ! declare -F _direnv_hook >/dev/null; then
   printf 'direnv Bash hook must be enabled by the shared module\n' >&2
   exit 1
 fi
-claude_path="$(direnv exec "$worktree" bash -c 'command -v claude')"
-assert_equal "direnv Claude Code path" "$DEVENV_DOTFILE/profile/bin/claude" "$claude_path"
-# Pi and the status line come from the shared module too, so a consumer that
-# declares neither still resolves both out of the project profile.
-pi_path="$(direnv exec "$worktree" bash -c 'command -v pi')"
-assert_equal "direnv Pi path" "$DEVENV_DOTFILE/profile/bin/pi" "$pi_path"
+# Claude Code and Pi are host installs. The profile must never carry them, or
+# it would shadow the self-updating copies behind it on PATH.
+for tool in claude pi; do
+  if [ -e "$DEVENV_DOTFILE/profile/bin/$tool" ]; then
+    printf 'the shared module must not package %s\n' "$tool" >&2
+    exit 1
+  fi
+done
+# The status line comes from the shared module, so a consumer that declares
+# nothing still resolves it out of the project profile.
 status_line_path="$(direnv exec "$worktree" bash -c 'command -v claude-status-line')"
 assert_equal "direnv status line path" "$DEVENV_DOTFILE/profile/bin/claude-status-line" "$status_line_path"
 # The Herdr Claude integration hook execs python3. Without it the hook exits

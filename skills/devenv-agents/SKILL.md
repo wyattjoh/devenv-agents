@@ -2,7 +2,7 @@
 name: devenv-agents
 description: Integrates the devenv-agents shared module into existing devenv projects. Use when asked to add agent tooling, the project CLI, shared worktree state, Herdr-ready direnv activation, scoped services, or cross-project references to a devenv environment.
 license: MIT
-compatibility: Requires Git and devenv. The published input uses GitHub over SSH, and Claude Code requires allowUnfree in devenv.yaml.
+compatibility: Requires Git and devenv. The published input uses GitHub over SSH. Claude Code and Pi are host installs the module does not provide.
 ---
 
 # Integrate devenv-agents
@@ -39,9 +39,10 @@ Read these only when the request needs them:
 6. Add `agents.session` or `.agents/project.toml` only when the user needs a
    stable session name, main-checkout-only services, or cross-project grants.
    The checkout basename is already the default session.
-7. Do not add `project`, Git, GitHub CLI, `just`, Claude Code, Pi, Python,
-   `direnv`, or `claude-status-line` to the consumer's packages: the shared
-   module owns them. Point out existing duplicates and ask before removing them.
+7. Do not add `project`, Git, GitHub CLI, `just`, Python, `direnv`, or
+   `claude-status-line` to the consumer's packages: the shared module owns them.
+   Do not add Claude Code or Pi either: they are host installs that update
+   outside devenv, and a packaged copy would shadow them. Point out existing duplicates and ask before removing them.
 8. Format changed files with the consumer's formatter, then run the bootstrap
    and verification sequence from the integration reference. If a command
    cannot run, report the exact command and blocker instead of claiming success.
