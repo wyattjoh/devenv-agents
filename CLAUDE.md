@@ -43,16 +43,20 @@ its Bash hook for in-place activation, and adds the flake's `project` package.
 It is also the single definition of the agent tooling every project shares:
 the Claude Code CLI, Pi, and the `claude-status-line` wrapper this flake builds
 from a pinned `claude-status-line` source input. Consumers declare none of the
-three. Pi comes from the consumer's nixpkgs, so upgrading it is a nixpkgs bump
-rather than an edit in each project. nixpkgs has no `x86_64-darwin` build of
-Pi, so the module includes it only where `lib.meta.availableOn` says it exists
-and omits it elsewhere rather than failing to evaluate. It also provides `python3`, which Herdr's
-Claude integration hook execs; without it the hook exits silently and a running
-Claude is never reported as an agent. Because Claude Code is an unfree nixpkgs
-package, consumers must set `allowUnfree: true` in `devenv.yaml`. Claude Code
-comes from nixpkgs rather than the native self-updating installer because that
-installer ships a generic dynamically-linked binary that NixOS cannot execute
-without `nix-ld`. Herdr stays native under `~/.local/bin`, which the module
+three. Claude Code and Pi are exported as packages from this flake's pinned
+nixpkgs and the module consumes those outputs, so advancing the consumer's
+`agents` input advances the complete shared toolchain without moving the
+consumer's application nixpkgs. Unstable no longer evaluates
+`x86_64-darwin`, so that system's outputs use the pinned 26.05 Darwin branch;
+the flake omits Pi there and keeps the rest of the environment evaluable. The
+flake narrowly permits the unfree Claude Code
+package while constructing its own package set; consumers do not need to enable
+unfree packages solely for this module. It also provides `python3`, which
+Herdr's Claude integration hook execs; without it the hook exits silently and a
+running Claude is never reported as an agent. Claude Code comes from nixpkgs
+rather than the native self-updating installer because that installer ships a
+generic dynamically-linked binary that NixOS cannot execute without `nix-ld`.
+Herdr stays native under `~/.local/bin`, which the module
 appends to `PATH` behind the stable project profile. Templates use the
 published GitHub input over SSH; CI overlays a local relative input so the
 checkout under test is evaluated. Onboarding approves `devenv` first,

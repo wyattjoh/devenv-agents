@@ -2,7 +2,7 @@
 name: devenv-agents
 description: Integrates the devenv-agents shared module into existing devenv projects. Use when asked to add agent tooling, the project CLI, shared worktree state, Herdr-ready direnv activation, scoped services, or cross-project references to a devenv environment.
 license: MIT
-compatibility: Requires Git and devenv. The published input uses GitHub over SSH, and Claude Code requires allowUnfree in devenv.yaml.
+compatibility: Requires Git and devenv. The published input uses GitHub over SSH.
 ---
 
 # Integrate devenv-agents
@@ -31,9 +31,9 @@ Read these only when the request needs them:
    and `.agents/project.toml` when present. Preserve all unrelated config.
 3. If the repository has no devenv configuration, ask whether to initialize it
    before creating files. Do not silently choose a project template.
-4. Merge the `agents` input, `agents` import, and `allowUnfree: true` into
-   `devenv.yaml`. Do not duplicate existing entries or replace other inputs and
-   imports.
+4. Merge the `agents` input and `agents` import into `devenv.yaml`. Do not
+   duplicate existing entries or replace other inputs, imports, or package
+   policy.
 5. Merge the committed direnv activation into `.envrc` and ensure `.direnv/` is
    ignored. Preserve custom hooks already in either file.
 6. Add `agents.session` or `.agents/project.toml` only when the user needs a

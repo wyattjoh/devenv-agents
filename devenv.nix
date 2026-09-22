@@ -16,11 +16,12 @@ let
   homeDirectory = builtins.getEnv "HOME";
   agentsPackages = inputs.agents.packages.${pkgs.stdenv.hostPlatform.system};
   project = agentsPackages.project;
+  claudeCode = agentsPackages."claude-code";
   claudeStatusLine = agentsPackages."claude-status-line";
-  # nixpkgs builds Pi for Linux and aarch64-darwin but not x86_64-darwin. Ask
-  # whether this platform is one of them rather than asserting it is, so the
-  # module still evaluates where Pi was never packaged.
-  piAvailable = lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.pi-coding-agent;
+  # The agents flake exports Pi only where its pinned nixpkgs builds it. Ask
+  # whether this platform has that output rather than consulting the consumer's
+  # unrelated nixpkgs revision.
+  piAvailable = builtins.hasAttr "pi-coding-agent" agentsPackages;
   sharedTools = [
     "project"
     "git"
@@ -54,9 +55,10 @@ in
   config = lib.mkMerge [
     {
       # Claude Code, Pi, and the status line are agent tooling every project
-      # gets from here rather than defining again. Pi tracks the consumer's
-      # nixpkgs; a version bump is a nixpkgs bump, not an edit in each repo.
-      # Claude Code comes from nixpkgs rather than the native self-updating
+      # gets from this flake rather than defining again. Pinning all three behind
+      # the agents input makes one green agents revision the complete shared
+      # toolchain release, independent of each consumer's application nixpkgs.
+      # Claude Code still comes from nixpkgs rather than the native self-updating
       # installer: that installer ships a generic dynamically-linked binary,
       # which NixOS cannot execute without nix-ld. python3 is required by
       # Herdr's Claude integration hook, which exits silently without it and
@@ -66,11 +68,11 @@ in
         pkgs.git
         pkgs.just
         pkgs.gh
-        pkgs.claude-code
+        claudeCode
         claudeStatusLine
         pkgs.direnv
         pkgs.python3
-      ] ++ lib.optional piAvailable pkgs.pi-coding-agent;
+      ] ++ lib.optional piAvailable agentsPackages."pi-coding-agent";
       env.AGENTS_SESSION = config.agents.session;
       env.DISABLE_AUTOUPDATER = "1";
       env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = "1";

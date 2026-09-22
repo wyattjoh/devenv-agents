@@ -12,6 +12,8 @@ const packageManifest = JSON.parse(
 
 const flake = readFileSync(new URL("../flake.nix", import.meta.url), "utf8");
 
+const devenvModule = readFileSync(new URL("../devenv.nix", import.meta.url), "utf8");
+
 const templates = ["bare", "bun-ts", "deno", "rust"] as const;
 
 describe("runtime dependency boundary", () => {
@@ -30,6 +32,17 @@ describe("runtime dependency boundary", () => {
 
   it("makes direnv resolvable before the packaged CLI enters devenv", () => {
     expect(flake).toContain('--prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.direnv ]}"');
+  });
+
+  it("owns the shared agent toolchain behind the agents input", () => {
+    expect(flake).toContain('"claude-code" = pkgs.claude-code;');
+    expect(flake).toContain('"pi-coding-agent" = pkgs.pi-coding-agent;');
+    expect(flake).toContain('system != "x86_64-darwin"');
+    expect(flake).toContain("inputs.nixpkgs-darwin-x86.url =");
+    expect(devenvModule).toContain('claudeCode = agentsPackages."claude-code";');
+    expect(devenvModule).toContain('lib.optional piAvailable agentsPackages."pi-coding-agent"');
+    expect(devenvModule).not.toContain("pkgs.claude-code");
+    expect(devenvModule).not.toContain("pkgs.pi-coding-agent");
   });
 
   it("ships in-place devenv activation with every bundled template", () => {

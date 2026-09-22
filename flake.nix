@@ -2,6 +2,9 @@
   description = "devenv-agents project CLI and Herdr plugin";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  # Unstable dropped x86_64-darwin in 26.11. Keep the Intel package outputs on
+  # the final Darwin branch that still receives security updates.
+  inputs.nixpkgs-darwin-x86.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
   # The status line is a Deno program with no flake of its own. Take the source
   # here and wrap it below so every consumer of this flake resolves the same
   # pinned revision instead of packaging it again.
@@ -11,7 +14,7 @@
   };
 
   outputs =
-    { self, nixpkgs, claude-status-line }:
+    { self, nixpkgs, nixpkgs-darwin-x86, claude-status-line }:
     let
       systems = [
         "aarch64-darwin"
@@ -38,7 +41,20 @@
       packages = forEachSystem (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          packageNixpkgs = if system == "x86_64-darwin" then nixpkgs-darwin-x86 else nixpkgs;
+          pkgs = import packageNixpkgs {
+            inherit system;
+            config.allowUnfreePredicate =
+              package: packageNixpkgs.lib.getName package == "claude-code";
+          };
+          piAvailable =
+            system != "x86_64-darwin"
+            && packageNixpkgs.lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.pi-coding-agent;
+          agentToolPackages = {
+            "claude-code" = pkgs.claude-code;
+          } // nixpkgs.lib.optionalAttrs piAvailable {
+            "pi-coding-agent" = pkgs.pi-coding-agent;
+          };
           claudeStatusLine = pkgs.writeShellApplication {
             name = "claude-status-line";
             runtimeInputs = [ pkgs.deno ];
@@ -97,7 +113,7 @@
           "claude-status-line" = claudeStatusLine;
           "herdr-plugin" = herdrPlugin;
           default = project;
-        }
+        } // agentToolPackages
       );
 
       apps = forEachSystem (

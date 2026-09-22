@@ -10,17 +10,15 @@ inputs:
     url: git+ssh://git@github.com/wyattjoh/devenv-agents.git
 imports:
   - agents
-allowUnfree: true
 ```
 
 The input name must remain `agents`: the imported module reads
-`inputs.agents.packages` to obtain the packaged `project` command and status
-line. `imports: [agents]` imports the input's root `devenv.nix`; no import needs
-to be added to the consumer's `devenv.nix`.
-
-`allowUnfree: true` is required because the module adds nixpkgs' unfree
-`claude-code` package. Merge the setting with existing YAML rather than
-rewriting the file. Preserve other inputs, imports, and policy keys.
+`inputs.agents.packages` to obtain the packaged project command, status line,
+Claude Code, and Pi. `imports: [agents]` imports the input's root `devenv.nix`;
+no import needs to be added to the consumer's `devenv.nix`. The agents flake
+narrowly permits Claude Code while constructing its pinned package set, so a
+consumer does not need `allowUnfree: true` solely for this module. Preserve any
+existing package-policy keys because the application may still need them.
 
 A consumer's `devenv.nix` stays application-specific:
 
@@ -129,13 +127,14 @@ noninteractive `devenv shell -- true` warm, and `project sync`.
 
 ## Troubleshooting
 
-- **Unfree package error:** confirm the exact YAML key is
-  `allowUnfree: true`.
+- **Unfree package error from an application package:** set the consumer's
+  package policy for that package; the shared Claude Code package is already
+  admitted by the agents flake.
 - **Input fetch fails:** the published template URL uses GitHub over SSH; verify
   that the machine can authenticate to `git@github.com`.
-- **Pi absent on Intel macOS:** nixpkgs does not build `pi-coding-agent` for
-  `x86_64-darwin`. The module deliberately omits Pi there while keeping the rest
-  of the environment evaluable.
+- **Pi absent on Intel macOS:** the shared flake deliberately omits Pi there
+  while keeping the rest of the environment evaluable from its pinned 26.05
+  Darwin package set.
 - **Herdr missing:** Herdr remains a native install under `~/.local/bin`; the
   module adds that directory to `PATH` but does not package Herdr.
 - **Stale profile in a running shell:** rerun `devenv shell -- true`; the module
@@ -144,7 +143,7 @@ noninteractive `devenv shell -- true` warm, and `project sync`.
 
 ## Repository sources
 
-- `templates/*/devenv.yaml` — published consumer input, import, and unfree policy
+- `templates/*/devenv.yaml` — published consumer input and import
 - `templates/*/.envrc` and `templates/*/.gitignore` — activation contract
 - `devenv.nix` — imported module and verification assertions
 - `src/worktree-bootstrap.ts` — worktree bootstrap order

@@ -40,7 +40,7 @@ const writeEnvironment = (
   mkdirSync(`${directory}/.agents`, { recursive: true });
   writeFileSync(
     `${directory}/devenv.yaml`,
-    `inputs:\n  agents:\n    url: path:${agentsRoot}\nimports:\n  - agents\nallowUnfree: true\n`,
+    `inputs:\n  agents:\n    url: path:${agentsRoot}\nimports:\n  - agents\n`,
   );
   writeFileSync(
     `${directory}/devenv.nix`,
