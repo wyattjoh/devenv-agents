@@ -18,8 +18,8 @@ The input name must remain `agents`: the imported module reads
 line. `imports: [agents]` imports the input's root `devenv.nix`; no import needs
 to be added to the consumer's `devenv.nix`.
 
-`allowUnfree: true` is required because the module adds nixpkgs' unfree
-`claude-code` package. Merge the setting with existing YAML rather than
+The templates set `allowUnfree: true` so projects can add unfree packages; the
+module itself no longer needs it. Merge the setting with existing YAML rather than
 rewriting the file. Preserve other inputs, imports, and policy keys.
 
 A consumer's `devenv.nix` stays application-specific:
@@ -133,9 +133,10 @@ noninteractive `devenv shell -- true` warm, and `project sync`.
   `allowUnfree: true`.
 - **Input fetch fails:** the published template URL uses GitHub over SSH; verify
   that the machine can authenticate to `git@github.com`.
-- **Pi absent on Intel macOS:** nixpkgs does not build `pi-coding-agent` for
-  `x86_64-darwin`. The module deliberately omits Pi there while keeping the rest
-  of the environment evaluable.
+- **`claude` or `pi` not found:** neither is packaged. Install Claude Code with
+  its native installer, which lands in `~/.local/bin` and updates itself (on
+  NixOS, enable `programs.nix-ld`), and Pi with
+  `mise use -g npm:@earendil-works/pi-coding-agent`.
 - **Herdr missing:** Herdr remains a native install under `~/.local/bin`; the
   module adds that directory to `PATH` but does not package Herdr.
 - **Stale profile in a running shell:** rerun `devenv shell -- true`; the module
