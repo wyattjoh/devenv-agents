@@ -14,12 +14,18 @@ allowUnfree: true
 ```
 
 The input name must remain `agents`: the imported module reads
-`inputs.agents.packages` to obtain the packaged `project` command and status
-line. `imports: [agents]` imports the input's root `devenv.nix`; no import needs
-to be added to the consumer's `devenv.nix`.
+`inputs.agents.packages` to obtain the packaged `project` command, status line,
+Claude Code, and Pi. `imports: [agents]` imports the input's root `devenv.nix`;
+no import needs to be added to the consumer's `devenv.nix`.
 
-`allowUnfree: true` is required because the module adds nixpkgs' unfree
-`claude-code` package. Merge the setting with existing YAML rather than
+Claude Code and Pi come from the `agents` input's own nixpkgs, so their versions
+move with `devenv update agents` rather than with the consumer's `nixpkgs`
+input. Do not set `inputs.agents.inputs.nixpkgs.follows`; it pins both back to
+the consumer's nixpkgs, which by default is the slower `devenv-nixpkgs/rolling`.
+
+The templates set `allowUnfree: true`. The module no longer needs it for Claude
+Code, which the flake admits itself, but keep the key so projects can add unfree
+packages of their own. Merge the setting with existing YAML rather than
 rewriting the file. Preserve other inputs, imports, and policy keys.
 
 A consumer's `devenv.nix` stays application-specific:
@@ -134,8 +140,12 @@ noninteractive `devenv shell -- true` warm, and `project sync`.
 - **Input fetch fails:** the published template URL uses GitHub over SSH; verify
   that the machine can authenticate to `git@github.com`.
 - **Pi absent on Intel macOS:** nixpkgs does not build `pi-coding-agent` for
-  `x86_64-darwin`. The module deliberately omits Pi there while keeping the rest
-  of the environment evaluable.
+  `x86_64-darwin`. The flake does not export it there and the module omits it,
+  keeping the rest of the environment evaluable.
+- **Claude Code or Pi still old after `devenv update`:** both follow the
+  `agents` input's `flake.lock`. Confirm `devenv.lock` moved the `agents` node,
+  and that `devenv.yaml` does not make the input's nixpkgs follow the
+  consumer's.
 - **Herdr missing:** Herdr remains a native install under `~/.local/bin`; the
   module adds that directory to `PATH` but does not package Herdr.
 - **Stale profile in a running shell:** rerun `devenv shell -- true`; the module

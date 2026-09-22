@@ -29,7 +29,7 @@ tests/tree-root-shell.test.sh # shell assertions for the tree-root environment
 fixtures/                  # captured Herdr protocol responses
 plugin/                    # packaged Herdr plugin directory
 skills/devenv-agents/      # consumer integration skill and reference guides
-flake.nix                  # Nix packages for project and herdr-plugin
+flake.nix                  # Nix packages for project, herdr-plugin, and agent tooling
 ```
 
 The command runner's default implementation spawns real processes. Tests use
@@ -43,13 +43,18 @@ its Bash hook for in-place activation, and adds the flake's `project` package.
 It is also the single definition of the agent tooling every project shares:
 the Claude Code CLI, Pi, and the `claude-status-line` wrapper this flake builds
 from a pinned `claude-status-line` source input. Consumers declare none of the
-three. Pi comes from the consumer's nixpkgs, so upgrading it is a nixpkgs bump
-rather than an edit in each project. nixpkgs has no `x86_64-darwin` build of
-Pi, so the module includes it only where `lib.meta.availableOn` says it exists
-and omits it elsewhere rather than failing to evaluate. It also provides `python3`, which Herdr's
+three. Claude Code and Pi are exported by this flake from its own nixpkgs, not
+taken from the consumer's: devenv's default nixpkgs is `devenv-nixpkgs/rolling`,
+which lags unstable, so a consumer bumping its own nixpkgs could still sit
+several releases behind. Upgrading either is this repository's weekly
+`flake.lock` bump followed by `devenv update agents` in each consumer. The flake
+admits the unfree `claude-code` through its own `allowUnfreePredicate`, so it
+does not depend on the consumer's policy. nixpkgs has no `x86_64-darwin` build
+of Pi, so the flake exports `pi-coding-agent` only where
+`lib.meta.availableOn` says it exists and the module includes it only when the
+attribute is present. It also provides `python3`, which Herdr's
 Claude integration hook execs; without it the hook exits silently and a running
-Claude is never reported as an agent. Because Claude Code is an unfree nixpkgs
-package, consumers must set `allowUnfree: true` in `devenv.yaml`. Claude Code
+Claude is never reported as an agent. Claude Code
 comes from nixpkgs rather than the native self-updating installer because that
 installer ships a generic dynamically-linked binary that NixOS cannot execute
 without `nix-ld`. Herdr stays native under `~/.local/bin`, which the module

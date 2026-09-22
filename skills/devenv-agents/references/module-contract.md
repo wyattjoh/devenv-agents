@@ -14,6 +14,9 @@ The module puts these tools on `PATH`:
 - direnv;
 - Pi where nixpkgs marks `pi-coding-agent` available for the host platform.
 
+Claude Code and Pi resolve from this repository's `flake.lock`, not the
+consumer's nixpkgs. Run `devenv update agents` to pick up newer versions.
+
 It also appends `~/.local/bin` so native tools such as Herdr remain reachable.
 The stable devenv profile stays first on `PATH`, followed by the shared Cargo,
 npm, and Bun bin directories.

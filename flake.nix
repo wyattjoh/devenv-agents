@@ -38,7 +38,16 @@
       packages = forEachSystem (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            # Claude Code is unfree. A consumer's allowUnfree never reaches this
+            # import, so admit that one package here rather than all of them.
+            config.allowUnfreePredicate = pkg: nixpkgs.lib.getName pkg == "claude-code";
+          };
+          # nixpkgs builds Pi for Linux and aarch64-darwin but not x86_64-darwin.
+          # Leave the attribute out where it was never packaged so the module can
+          # test for it and `nix flake show` never evaluates a broken derivation.
+          piAvailable = pkgs.lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.pi-coding-agent;
           claudeStatusLine = pkgs.writeShellApplication {
             name = "claude-status-line";
             runtimeInputs = [ pkgs.deno ];
@@ -94,9 +103,15 @@
         in
         {
           inherit claudeStatusLine herdrPlugin project;
+          # Agent tooling resolves from this flake's nixpkgs, not the consumer's,
+          # so the weekly flake.lock bump is what moves every project's versions.
+          "claude-code" = pkgs.claude-code;
           "claude-status-line" = claudeStatusLine;
           "herdr-plugin" = herdrPlugin;
           default = project;
+        }
+        // pkgs.lib.optionalAttrs piAvailable {
+          "pi-coding-agent" = pkgs.pi-coding-agent;
         }
       );
 

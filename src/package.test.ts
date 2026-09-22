@@ -32,6 +32,17 @@ describe("runtime dependency boundary", () => {
     expect(flake).toContain('--prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.direnv ]}"');
   });
 
+  it("resolves agent tooling from the flake's nixpkgs instead of the consumer's", () => {
+    const module = readFileSync(new URL("../devenv.nix", import.meta.url), "utf8");
+
+    expect(flake).toContain('"claude-code" = pkgs.claude-code;');
+    expect(flake).toContain('"pi-coding-agent" = pkgs.pi-coding-agent;');
+    expect(module).toContain('agentsPackages."claude-code"');
+    expect(module).toContain('agentsPackages."pi-coding-agent"');
+    expect(module).not.toContain("pkgs.claude-code");
+    expect(module).not.toContain("pkgs.pi-coding-agent");
+  });
+
   it("ships in-place devenv activation with every bundled template", () => {
     const envrc = '#!/usr/bin/env bash\n\neval "$(devenv direnvrc)"\n\nuse devenv\n';
 

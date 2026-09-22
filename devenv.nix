@@ -16,11 +16,12 @@ let
   homeDirectory = builtins.getEnv "HOME";
   agentsPackages = inputs.agents.packages.${pkgs.stdenv.hostPlatform.system};
   project = agentsPackages.project;
+  claudeCode = agentsPackages."claude-code";
   claudeStatusLine = agentsPackages."claude-status-line";
-  # nixpkgs builds Pi for Linux and aarch64-darwin but not x86_64-darwin. Ask
-  # whether this platform is one of them rather than asserting it is, so the
+  # The flake exports Pi only where nixpkgs builds it, which excludes
+  # x86_64-darwin. Ask whether it is there rather than asserting it is, so the
   # module still evaluates where Pi was never packaged.
-  piAvailable = lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.pi-coding-agent;
+  piAvailable = agentsPackages ? "pi-coding-agent";
   sharedTools = [
     "project"
     "git"
@@ -54,8 +55,11 @@ in
   config = lib.mkMerge [
     {
       # Claude Code, Pi, and the status line are agent tooling every project
-      # gets from here rather than defining again. Pi tracks the consumer's
-      # nixpkgs; a version bump is a nixpkgs bump, not an edit in each repo.
+      # gets from here rather than defining again. Claude Code and Pi come from
+      # this flake's nixpkgs, not the consumer's: devenv's default nixpkgs is
+      # devenv-nixpkgs/rolling, which lags unstable, so a consumer bumping its
+      # own nixpkgs could still be several releases behind. A version bump is
+      # this repository's flake.lock bump followed by `devenv update agents`.
       # Claude Code comes from nixpkgs rather than the native self-updating
       # installer: that installer ships a generic dynamically-linked binary,
       # which NixOS cannot execute without nix-ld. python3 is required by
@@ -66,11 +70,11 @@ in
         pkgs.git
         pkgs.just
         pkgs.gh
-        pkgs.claude-code
+        claudeCode
         claudeStatusLine
         pkgs.direnv
         pkgs.python3
-      ] ++ lib.optional piAvailable pkgs.pi-coding-agent;
+      ] ++ lib.optional piAvailable agentsPackages."pi-coding-agent";
       env.AGENTS_SESSION = config.agents.session;
       env.DISABLE_AUTOUPDATER = "1";
       env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD = "1";

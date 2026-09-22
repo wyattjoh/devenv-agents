@@ -2,7 +2,7 @@
 name: devenv-agents
 description: Integrates the devenv-agents shared module into existing devenv projects. Use when asked to add agent tooling, the project CLI, shared worktree state, Herdr-ready direnv activation, scoped services, or cross-project references to a devenv environment.
 license: MIT
-compatibility: Requires Git and devenv. The published input uses GitHub over SSH, and Claude Code requires allowUnfree in devenv.yaml.
+compatibility: Requires Git and devenv. The published input uses GitHub over SSH.
 ---
 
 # Integrate devenv-agents
