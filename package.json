@@ -20,12 +20,12 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@oxlint/plugins": "1.83.0",
-    "@types/bun": "1.4.2",
-    "@types/node": "^26.6.1",
-    "lefthook": "^2.1.14",
-    "oxfmt": "^0.68.0",
-    "oxlint": "^1.83.0",
+    "@oxlint/plugins": "1.88.0",
+    "@types/bun": "1.4.3",
+    "@types/node": "^26.6.5",
+    "lefthook": "^2.2.2",
+    "oxfmt": "^0.73.0",
+    "oxlint": "^1.88.0",
     "typescript": "^7.0.2"
   },
   "engines": {
