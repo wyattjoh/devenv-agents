@@ -176,10 +176,17 @@ in
           fi
         done
 
-        # Linux routes agent configuration through the host layer. Darwin leaves
-        # all three undefined, so there is nothing module-owned to assert there.
+        # Claude Code keeps the caller's config directory on every platform
+        # (~/.claude by default), so the module must never route it into the
+        # agents layer.
+        if [ "''${CLAUDE_CONFIG_DIR:-}" = "$HOME/.local/share/agents/claude" ]; then
+          printf 'CLAUDE_CONFIG_DIR must not point into the agents layer\n' >&2
+          exit 1
+        fi
+
+        # Linux routes gh and Pi configuration through the host layer. Darwin
+        # leaves both undefined, so there is nothing module-owned to assert there.
         if [ "$(uname -s)" = Linux ]; then
-          assert_equal CLAUDE_CONFIG_DIR "$HOME/.local/share/agents/claude" "$CLAUDE_CONFIG_DIR"
           assert_equal GH_CONFIG_DIR "$HOME/.local/share/agents/gh" "$GH_CONFIG_DIR"
           assert_equal PI_CODING_AGENT_DIR "$HOME/.local/share/agents/pi" "$PI_CODING_AGENT_DIR"
         fi
@@ -196,10 +203,10 @@ in
         exec = ''exec project update'';
       };
     }
-    # Linux uses the host layer for Claude, gh, and Pi configuration; Darwin
-    # leaves all three undefined so each tool preserves its caller configuration.
+    # Linux uses the host layer for gh and Pi configuration; Darwin leaves both
+    # undefined so each tool preserves its caller configuration. Claude Code is
+    # left alone everywhere: its config directory stays the caller's.
     (lib.mkIf pkgs.stdenv.hostPlatform.isLinux {
-      env.CLAUDE_CONFIG_DIR = "${homeDirectory}/.local/share/agents/claude";
       env.GH_CONFIG_DIR = "${homeDirectory}/.local/share/agents/gh";
       env.PI_CODING_AGENT_DIR = "${homeDirectory}/.local/share/agents/pi";
     })

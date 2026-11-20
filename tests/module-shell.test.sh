@@ -6,7 +6,9 @@ worktree_path=${2:?worktree path is required}
 main="$(cd "$main_path" && pwd -P)"
 worktree="$(cd "$worktree_path" && pwd -P)"
 
-# Linux replaces these with absolute host-layer paths; Darwin preserves them.
+# Linux replaces the gh and Pi paths with absolute host-layer paths; Darwin
+# preserves them. CLAUDE_CONFIG_DIR is never touched: Claude Code keeps the
+# caller's directory (~/.claude by default) on every platform.
 caller_claude_config_dir=${CLAUDE_CONFIG_DIR:?CLAUDE_CONFIG_DIR is required}
 caller_gh_config_dir=${GH_CONFIG_DIR:?GH_CONFIG_DIR is required}
 caller_pi_coding_agent_dir=${PI_CODING_AGENT_DIR:?PI_CODING_AGENT_DIR is required}
@@ -105,14 +107,14 @@ assert_equal PATH[1] "$CARGO_HOME/bin" "$path_cargo"
 assert_equal PATH[2] "$NPM_CONFIG_PREFIX/bin" "$path_npm"
 assert_equal PATH[3] "$BUN_INSTALL/bin" "$path_bun"
 
+assert_equal CLAUDE_CONFIG_DIR "$EXPECTED_CLAUDE_CONFIG_DIR" "$CLAUDE_CONFIG_DIR"
+
 case "$(uname -s)" in
   Linux)
-    assert_equal CLAUDE_CONFIG_DIR "$HOME/.local/share/agents/claude" "$CLAUDE_CONFIG_DIR"
     assert_equal GH_CONFIG_DIR "$HOME/.local/share/agents/gh" "$GH_CONFIG_DIR"
     assert_equal PI_CODING_AGENT_DIR "$HOME/.local/share/agents/pi" "$PI_CODING_AGENT_DIR"
     ;;
   Darwin)
-    assert_equal CLAUDE_CONFIG_DIR "$EXPECTED_CLAUDE_CONFIG_DIR" "$CLAUDE_CONFIG_DIR"
     assert_equal GH_CONFIG_DIR "$EXPECTED_GH_CONFIG_DIR" "$GH_CONFIG_DIR"
     assert_equal PI_CODING_AGENT_DIR "$EXPECTED_PI_CODING_AGENT_DIR" "$PI_CODING_AGENT_DIR"
     ;;

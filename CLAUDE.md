@@ -63,7 +63,9 @@ an interactive nested `devenv shell`. The packaged `project` wrapper supplies
 The module also defines `enterTest`, so `devenv test` asserts the invariants
 every consumer depends on: the `AGENTS_*` variables, the per-language state
 directories under `.devenv/state`, the fixed `PATH` prefix order, the tools the
-module puts on `PATH`, and the Linux host-layer config paths. Keep these
+module puts on `PATH`, the Linux host-layer gh and Pi config paths, and that
+`CLAUDE_CONFIG_DIR` never points into the agents layer (Claude Code keeps the
+caller's `~/.claude` on every platform). Keep these
 assertions consumer-agnostic. Fixture-specific behavior -- scoped services, the
 direnv prompt cycle, and Darwin's caller-preserved config paths -- belongs in
 `tests/module-shell.test.sh`, which supplies its own two-checkout fixture. On

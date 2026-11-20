@@ -43,16 +43,17 @@ The language state directories are shared by the main checkout and its linked
 worktrees. Do not redefine them in a consumer unless the module itself is being
 changed.
 
-On Linux, agent configuration is also routed through the host layer:
+On Linux, gh and Pi configuration is also routed through the host layer:
 
 ```text
-CLAUDE_CONFIG_DIR=$HOME/.local/share/agents/claude
 GH_CONFIG_DIR=$HOME/.local/share/agents/gh
 PI_CODING_AGENT_DIR=$HOME/.local/share/agents/pi
 ```
 
 Darwin leaves those variables undefined so the caller's native configuration
-continues to apply.
+continues to apply. The module never sets `CLAUDE_CONFIG_DIR` on any
+platform: Claude Code keeps the caller's directory (`~/.claude` by default),
+and `enterTest` fails if it points into the agents layer.
 
 ## Root shapes
 
@@ -106,7 +107,8 @@ project:update  -> project update
 
 Its `enterTest` script makes every consumer's `devenv test` assert the shared
 contract: project/worktree identity, state directories, PATH ordering, required
-tools, and Linux config paths. Consumer-specific `enterTest` content is merged
+tools, the Linux gh and Pi config paths, and that `CLAUDE_CONFIG_DIR` is never
+routed into the agents layer. Consumer-specific `enterTest` content is merged
 with these assertions by devenv.
 
 ## Repository sources
